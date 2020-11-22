@@ -1,0 +1,3092 @@
+theory TikLegerHTLC begin
+
+// Function signature and definition of the equational theory E
+
+builtins: multiset
+functions: HTLChash/1, TXhash/1, fst/1, h/1, pair/2, pk/1, sign/2,
+           snd/1, true/0, verify/3
+equations:
+    fst(<x.1, x.2>) = x.1,
+    snd(<x.1, x.2>) = x.2,
+    verify(sign(x.1, x.2), x.1, pk(x.2)) = true
+
+
+
+rule (modulo E) address_register:
+   [ Fr( ~ltkA ) ]
+  --[ !PK( $A, pk(~ltkA) ) ]->
+   [ !Ltk( $A, ~ltkA ), !PK( $A, pk(~ltkA) ), Out( pk(~ltkA) ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) HTLCinstance:
+   [
+   !PK( A, pkA1 ), !PK( A, pkA2 ), !PK( A, pkA3 ), !PK( B, pkB1 ),
+   !PK( B, pkB2 ), !PK( B, pkB3 )
+   ]
+  --[
+  HTLC_instance( '1' ), InEq( A, B ), InEq( pkA1, pkA3 ),
+  InEq( pkA1, pkA2 ), InEq( pkA2, pkA3 ), InEq( pkB1, pkB3 ),
+  InEq( pkB2, pkB3 ), InEq( pkB1, pkB2 )
+  ]->
+   [
+   HTLC( A, B, pkA1, pkA2, pkA3, pkB1, pkB2, pkB3 ),
+   HTLC( A, B, pkA1, pkA2, pkA3, pkB1, pkB2, pkB3 )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+restriction OneHTLCinstance:
+  "âˆ€ #i #j #k.
+    (((HTLC_instance( '1' ) @ #i) âˆ§ (HTLC_instance( '1' ) @ #j)) âˆ§
+     (HTLC_instance( '1' ) @ #k)) â‡’
+    (((#i = #j) âˆ¨ (#j = #k)) âˆ¨ (#i = #k))"
+  // safety formula
+
+rule (modulo E) Blockchain:
+   [ ]
+  --[ BChain( '1' ) ]->
+   [ Chain( 'BC1' ), Chain( 'BC2' ), Out( 'BC1' ), Out( 'BC2' ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Tik_start:
+   [ Chain( BC ) ]
+  --[ TikStart( BC, '1' ), Tik( BC, '1' ), LedgerTik( BC, '1' ) ]->
+   [ Tik( BC, '1' ), LedgerTik( BC, '1' ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Tik:
+   [ Tik( BC, height ) ]
+  --[ Tik( BC, ('1'+height) ), LedgerTik( BC, ('1'+height) ) ]->
+   [ Tik( BC, ('1'+height) ), LedgerTik( BC, ('1'+height) ) ]
+
+  // loop breaker: [0]
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) timelock:
+   [ ] --> [ !Timelock( ('1'+'1'+'1') ), !Timelock( ('1'+'1') ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Block_MineCoin:
+   [ Fr( ~n ), !PK( A, pkA ), LedgerTik( BC, t ) ]
+  --[ MineCoin( BC, ~n, t ) ]->
+   [
+   !CoinOnBlock( BC, '0', '0', pkA, ~n, t ),
+   Out( <'0', '0', pkA, ~n> )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Block_Coin2Coin:
+   [
+   !CoinOnBlock( BC, txPrevious, SigPre, pkA, tx, LedgerTik ),
+   LedgerTik( BC, t ), !PK( B, pkB ), In( <tx, SigA, pkB> )
+   ]
+  --[
+  HappenBefore( BC, LedgerTik, t ),
+  Eq( verify(SigA, <BC, tx, pkA, pkB>, pkA), true ),
+  !CoinOnBlock( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+  Spend( tx )
+  ]->
+   [
+   !CoinOnBlock( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+   Out( <tx, SigA, pkB, TXhash(<tx, SigA, pkB>)> )
+   ]
+
+  // loop breaker: [0]
+  /*
+  rule (modulo AC) Block_Coin2Coin:
+     [
+     !CoinOnBlock( BC, txPrevious, SigPre, pkA, tx, LedgerTik ),
+     LedgerTik( BC, t ), !PK( B, pkB ), In( <tx, SigA, pkB> )
+     ]
+    --[
+    HappenBefore( BC, LedgerTik, t ), Eq( z, true ),
+    !CoinOnBlock( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+    Spend( tx )
+    ]->
+     [
+     !CoinOnBlock( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+     Out( <tx, SigA, pkB, TXhash(<tx, SigA, pkB>)> )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.12
+       SigA  = SigA.12
+       pkA   = pkA.12
+       pkB   = pkB.12
+       tx    = tx.12
+       z     = verify(SigA.12, <BC.12, tx.12, pkA.12, pkB.12>, pkA.12)
+    
+    2. BC    = x.12
+       SigA  = sign(<x.12, x.14, pk(x.15), x.16>, x.15)
+       pkA   = pk(x.15)
+       pkB   = x.16
+       tx    = x.14
+       z     = true
+    // loop breaker: [0]
+  */
+
+rule (modulo E) Block_Coin2HCoin:
+   [
+   !CoinOnBlock( BC, txPrevious, SigPre, pkA_0, tx, LedgerTik ),
+   In( <tx, SigA_0, pkA, pkB, hash, pkC> ), LedgerTik( BC, t )
+   ]
+  --[
+  Coin2Hcoin( BC, tx, t ), HappenBefore( BC, LedgerTik, t ),
+  Eq( verify(SigA_0, <BC, tx, pkA_0, pkA, pkB, hash, pkC>, pkA_0),
+      true
+  ),
+  !HCoinOnBlock( BC, tx, SigA_0, <pkA, pkB, hash, pkC>,
+                 TXhash(<tx, SigA_0, pkA, pkB, hash, pkC>), t
+  ),
+  Spend( tx )
+  ]->
+   [
+   !HCoinOnBlock( BC, tx, SigA_0, <pkA, pkB, hash, pkC>,
+                  TXhash(<tx, SigA_0, pkA, pkB, hash, pkC>), t
+   )
+   ]
+
+  /*
+  rule (modulo AC) Block_Coin2HCoin:
+     [
+     !CoinOnBlock( BC, txPrevious, SigPre, pkA_0, tx, LedgerTik ),
+     In( <tx, SigA_0, pkA, pkB, hash, pkC> ), LedgerTik( BC, t )
+     ]
+    --[
+    Coin2Hcoin( BC, tx, t ), HappenBefore( BC, LedgerTik, t ),
+    Eq( z, true ),
+    !HCoinOnBlock( BC, tx, SigA_0, <pkA, pkB, hash, pkC>,
+                   TXhash(<tx, SigA_0, pkA, pkB, hash, pkC>), t
+    ),
+    Spend( tx )
+    ]->
+     [
+     !HCoinOnBlock( BC, tx, SigA_0, <pkA, pkB, hash, pkC>,
+                    TXhash(<tx, SigA_0, pkA, pkB, hash, pkC>), t
+     )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.14
+       SigA_0
+             = SigA_0.14
+       hash  = hash.14
+       pkA   = pkA.14
+       pkA_0 = pkA_0.14
+       pkB   = pkB.14
+       pkC   = pkC.14
+       tx    = tx.14
+       z     = verify(SigA_0.14,
+                      <BC.14, tx.14, pkA_0.14, pkA.14, pkB.14, hash.14, pkC.14>,
+                      pkA_0.14)
+    
+    2. BC    = x.14
+       SigA_0
+             = sign(<x.14, x.16, pk(x.17), x.18, x.19, x.20, x.21>, x.17)
+       hash  = x.20
+       pkA   = x.18
+       pkA_0 = pk(x.17)
+       pkB   = x.19
+       pkC   = x.21
+       tx    = x.16
+       z     = true
+  */
+
+rule (modulo E) Block_HCoin2Coin:
+   [
+   !HCoinOnBlock( BC, tx0, SigA_0, <pkA1, pkB1, hash, pkB3>, tx,
+                  LedgerTik
+   )[+],
+   In( <tx, <Script1, Script2>, PKaddress, timelock> )[+],
+   LedgerTik( BC, t )
+   ]
+  --[
+  HTimecoin2coin( BC, tx, t ), HappenBefore( BC, '1', LedgerTik ),
+  HappenBefore( BC, (LedgerTik+timelock), t ),
+  Eq( verify(Script1,
+             <BC, tx, <pkA1, pkB1, hash, pkB3>, PKaddress, timelock>, pkA1),
+      true
+  ),
+  Eq( verify(Script2,
+             <BC, tx, <pkA1, pkB1, hash, pkB3>, PKaddress, timelock>, pkB1),
+      true
+  ),
+  SpendHTCoin( tx ), Spend( tx ),
+  !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                TXhash(<tx, <Script1, Script2>, PKaddress>), t
+  )
+  ]->
+   [
+   !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                 TXhash(<tx, <Script1, Script2>, PKaddress>), t
+   )
+   ]
+
+  // loop breaker: [0]
+  /*
+  rule (modulo AC) Block_HCoin2Coin:
+     [
+     !HCoinOnBlock( BC, tx0, SigA_0, <pkA1, pkB1, hash, pkB3>, tx,
+                    LedgerTik
+     )[+],
+     In( <tx, <Script1, Script2>, PKaddress, timelock> )[+],
+     LedgerTik( BC, t )
+     ]
+    --[
+    HTimecoin2coin( BC, tx, t ), HappenBefore( BC, '1', LedgerTik ),
+    HappenBefore( BC, (LedgerTik+timelock), t ), Eq( z, true ),
+    Eq( z.1, true ), SpendHTCoin( tx ), Spend( tx ),
+    !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                  TXhash(<tx, <Script1, Script2>, PKaddress>), t
+    )
+    ]->
+     [
+     !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                   TXhash(<tx, <Script1, Script2>, PKaddress>), t
+     )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.19
+       PKaddress
+             = PKaddress.21
+       Script1
+             = Script1.22
+       Script2
+             = Script2.23
+       hash  = hash.25
+       pkA1  = pkA1.26
+       pkB1  = pkB1.27
+       pkB3  = pkB3.28
+       timelock
+             = timelock.30
+       tx    = tx.31
+       z     = verify(Script1.22,
+                      <BC.19, tx.31, <pkA1.26, pkB1.27, hash.25, pkB3.28>, PKaddress.21, 
+                       timelock.30>,
+                      pkA1.26)
+       z.1   = verify(Script2.23,
+                      <BC.19, tx.31, <pkA1.26, pkB1.27, hash.25, pkB3.28>, PKaddress.21, 
+                       timelock.30>,
+                      pkB1.27)
+    
+    2. BC    = BC.27
+       PKaddress
+             = PKaddress.29
+       Script1
+             = sign(<BC.27, tx.39, <pk(x.48), pk(x.49), hash.33, pkB3.36>, 
+                     PKaddress.29, timelock.38>,
+                    x.48)
+       Script2
+             = sign(<BC.27, tx.39, <pk(x.48), pk(x.49), hash.33, pkB3.36>, 
+                     PKaddress.29, timelock.38>,
+                    x.49)
+       hash  = hash.33
+       pkA1  = pk(x.48)
+       pkB1  = pk(x.49)
+       pkB3  = pkB3.36
+       timelock
+             = timelock.38
+       tx    = tx.39
+       z     = true
+       z.1   = true
+    
+    3. BC    = BC.28
+       PKaddress
+             = PKaddress.30
+       Script1
+             = sign(<BC.28, tx.40, <pk(x.49), pkB1.36, hash.34, pkB3.37>, 
+                     PKaddress.30, timelock.39>,
+                    x.49)
+       Script2
+             = Script2.32
+       hash  = hash.34
+       pkA1  = pk(x.49)
+       pkB1  = pkB1.36
+       pkB3  = pkB3.37
+       timelock
+             = timelock.39
+       tx    = tx.40
+       z     = true
+       z.1   = verify(Script2.32,
+                      <BC.28, tx.40, <pk(x.49), pkB1.36, hash.34, pkB3.37>, 
+                       PKaddress.30, timelock.39>,
+                      pkB1.36)
+    
+    4. BC    = BC.29
+       PKaddress
+             = PKaddress.31
+       Script1
+             = Script1.32
+       Script2
+             = sign(<BC.29, tx.41, <pkA1.36, pk(x.52), hash.35, pkB3.38>, 
+                     PKaddress.31, timelock.40>,
+                    x.52)
+       hash  = hash.35
+       pkA1  = pkA1.36
+       pkB1  = pk(x.52)
+       pkB3  = pkB3.38
+       timelock
+             = timelock.40
+       tx    = tx.41
+       z     = verify(Script1.32,
+                      <BC.29, tx.41, <pkA1.36, pk(x.52), hash.35, pkB3.38>, 
+                       PKaddress.31, timelock.40>,
+                      pkA1.36)
+       z.1   = true
+    // loop breaker: [0]
+  */
+
+rule (modulo E) Block_HCoin2Coin_noTimelock:
+   [
+   !HCoinOnBlock( BC, tx0, SigA_0, <pkA1, pkB1, hash, pkB3>, tx,
+                  LedgerTik
+   )[+],
+   In( <tx, <Script1, Script2>, PKaddress> )[+], LedgerTik( BC, t )
+   ]
+  --[
+  Hcoin2coin( BC, tx, t ), HappenBefore( BC, '1', LedgerTik ),
+  HappenBefore( BC, LedgerTik, t ), Eq( HTLChash(Script1), hash ),
+  Eq( verify(Script2, <BC, tx, <pkA1, pkB1, hash, pkB3>, PKaddress>,
+             pkB3),
+      true
+  ),
+  SpendHCoin( tx ),
+  !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                TXhash(<tx, <Script1, Script2>, PKaddress>), t
+  ),
+  Spend( tx )
+  ]->
+   [
+   !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                 TXhash(<tx, <Script1, Script2>, PKaddress>), t
+   )
+   ]
+
+  // loop breaker: [0]
+  /*
+  rule (modulo AC) Block_HCoin2Coin_noTimelock:
+     [
+     !HCoinOnBlock( BC, tx0, SigA_0, <pkA1, pkB1, hash, pkB3>, tx,
+                    LedgerTik
+     )[+],
+     In( <tx, <Script1, Script2>, PKaddress> )[+], LedgerTik( BC, t )
+     ]
+    --[
+    Hcoin2coin( BC, tx, t ), HappenBefore( BC, '1', LedgerTik ),
+    HappenBefore( BC, LedgerTik, t ), Eq( HTLChash(Script1), hash ),
+    Eq( z, true ), SpendHCoin( tx ),
+    !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                  TXhash(<tx, <Script1, Script2>, PKaddress>), t
+    ),
+    Spend( tx )
+    ]->
+     [
+     !CoinOnBlock( BC, tx, <Script1, Script2>, PKaddress,
+                   TXhash(<tx, <Script1, Script2>, PKaddress>), t
+     )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.17
+       PKaddress
+             = PKaddress.19
+       Script2
+             = Script2.21
+       hash  = hash.23
+       pkA1  = pkA1.24
+       pkB1  = pkB1.25
+       pkB3  = pkB3.26
+       tx    = tx.28
+       z     = verify(Script2.21,
+                      <BC.17, tx.28, <pkA1.24, pkB1.25, hash.23, pkB3.26>, PKaddress.19>,
+                      pkB3.26)
+    
+    2. BC    = BC.25
+       PKaddress
+             = PKaddress.27
+       Script2
+             = sign(<BC.25, tx.36, <pkA1.32, pkB1.33, hash.31, pk(x.48)>, 
+                     PKaddress.27>,
+                    x.48)
+       hash  = hash.31
+       pkA1  = pkA1.32
+       pkB1  = pkB1.33
+       pkB3  = pk(x.48)
+       tx    = tx.36
+       z     = true
+    // loop breaker: [0]
+  */
+
+rule (modulo E) creatCointoCoin:
+   [
+   !CoinOnBlock( BC, txPrevious, SigA, pk(ltkB), tx, t ),
+   !PK( B, pk(ltkB) ), !PK( C, pkC ), Fr( ~txNew )
+   ]
+  --[ SpendCoin( BC, tx ) ]->
+   [
+   Out( <tx, sign(<BC, tx, pk(ltkB), pkC>, ltkB), pk(ltkB), ~txNew> )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+lemma Smart_adversary [sources]:
+  all-traces
+  "âˆ€ BC tx SigA pkB txNew t #i.
+    (!CoinOnBlock( BC, tx, SigA, pkB, txNew, t ) @ #i) â‡’
+    ((âˆƒ #j1 #j2 #j3.
+       (((((!KU( tx ) @ #j1) âˆ§ (!KU( SigA ) @ #j2)) âˆ§
+          (!KU( pkB ) @ #j3)) âˆ§
+         (#j1 < #i)) âˆ§
+        (#j2 < #i)) âˆ§
+       (#j3 < #i)) âˆ¨
+     (âˆƒ BC.1 tx.1 t.1 #j.
+       (MineCoin( BC.1, tx.1, t.1 ) @ #j) âˆ§ (#j < #i)))"
+/*
+guarded formula characterizing all counter-examples:
+"âˆƒ BC tx SigA pkB txNew t #i.
+  (!CoinOnBlock( BC, tx, SigA, pkB, txNew, t ) @ #i)
+ âˆ§
+  (âˆ€ #j1 #j2 #j3.
+    (!KU( tx ) @ #j1) âˆ§ (!KU( SigA ) @ #j2) âˆ§ (!KU( pkB ) @ #j3)
+   â‡’
+    ((Â¬(#j1 < #i)) âˆ¨ (Â¬(#j2 < #i)) âˆ¨ (Â¬(#j3 < #i)))) âˆ§
+  (âˆ€ BC.1 tx.1 t.1 #j.
+    (MineCoin( BC.1, tx.1, t.1 ) @ #j) â‡’ Â¬(#j < #i))"
+*/
+by sorry
+
+lemma ledger:
+  exists-trace
+  "âˆƒ BC tx SigA pkB txNew #i.
+    !CoinOnBlock( BC, tx, SigA, pkB, txNew, ('1'+'1') ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ BC tx SigA pkB txNew #i.
+  (!CoinOnBlock( BC, tx, SigA, pkB, txNew, ('1'+'1') ) @ #i)"
+*/
+by sorry
+
+lemma Coin2Hcoin:
+  exists-trace "âˆƒ BC tx #i. Coin2Hcoin( BC, tx, ('1'+'1') ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ BC tx #i. (Coin2Hcoin( BC, tx, ('1'+'1') ) @ #i)"
+*/
+by sorry
+
+lemma Hcoin2coinBC1:
+  exists-trace
+  "âˆƒ tx #i. HTimecoin2coin( 'BC1', tx, ('1'+'1'+'1'+'1'+'1') ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ tx #i.
+  (HTimecoin2coin( 'BC1', tx, ('1'+'1'+'1'+'1'+'1') ) @ #i)"
+*/
+by sorry
+
+lemma Hcoin2coinBC2:
+  exists-trace
+  "âˆƒ tx #i. HTimecoin2coin( 'BC2', tx, ('1'+'1'+'1'+'1') ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ tx #i. (HTimecoin2coin( 'BC2', tx, ('1'+'1'+'1'+'1') ) @ #i)"
+*/
+by sorry
+
+restriction DoubleSpending:
+  "âˆ€ x #i #j. ((Spend( x ) @ #i) âˆ§ (Spend( x ) @ #j)) â‡’ (#i = #j)"
+  // safety formula
+
+restriction uniqueTik:
+  "âˆ€ BC height #i #j.
+    ((Tik( BC, height ) @ #i) âˆ§ (Tik( BC, height ) @ #j)) â‡’ (#i = #j)"
+  // safety formula
+
+restriction oneLedger:
+  "âˆ€ #i #j.
+    ((BChain( '1' ) @ #i) âˆ§ (BChain( '1' ) @ #j)) â‡’ (#i = #j)"
+  // safety formula
+
+restriction ledgerHeight:
+  "Â¬(âˆƒ BC height #i.
+      Tik( BC, ('1'+'1'+'1'+'1'+'1'+'1'+'1'+height) ) @ #i)"
+  // safety formula
+
+restriction originalCoin:
+  "âˆ€ BC tx sig pkA txNew t #j.
+    (!CoinOnBlock( BC, tx, sig, pkA, txNew, t ) @ #j) â‡’
+    (âˆƒ n #i. (MineCoin( BC, n, '1' ) @ #i) âˆ§ (#i < #j))"
+
+restriction MineCoin_only_2:
+  "âˆ€ BC n1 t1 #i1 n2 t2 #i2 n3 t3 #i3.
+    (((MineCoin( BC, n1, t1 ) @ #i1) âˆ§
+      (MineCoin( BC, n2, t2 ) @ #i2)) âˆ§
+     (MineCoin( BC, n3, t3 ) @ #i3)) â‡’
+    (((#i1 = #i2) âˆ¨ (#i1 = #i3)) âˆ¨ (#i3 = #i2))"
+  // safety formula
+
+restriction No_keyReveal:
+  "âˆ€ #i A ltkA.
+    (!PK( A, pk(ltkA) ) @ #i) â‡’ (Â¬(âˆƒ #j. !KU( ltkA ) @ #j))"
+  // safety formula
+
+restriction HappenBefore:
+  "âˆ€ BC t1 t2 #i.
+    (HappenBefore( BC, t1, t2 ) @ #i) â‡’ (âˆƒ x. t2 = (t1+x))"
+
+restriction Equality:
+  "âˆ€ x y #i. (Eq( x, y ) @ #i) â‡’ (x = y)"
+  // safety formula
+
+restriction inequality:
+  "âˆ€ x #i. (InEq( x, x ) @ #i) â‡’ (âŠ¥)"
+  // safety formula
+
+rule (modulo E) Alice_sign:
+   [
+   Coin6_noSig( 'BC2', txCoin2, <pkB1, pk(ltkA1), hash, pkA3>, pkB2,
+                timelock_B
+   )
+   ]
+  --[ Alice_sign( 'BC2', txCoin2, hash, timelock_B ) ]->
+   [
+   Coin6_withSig( 'BC2', txCoin2, <pkB1, pk(ltkA1), hash, pkA3>, pkB2,
+                  timelock_B,
+                  sign(<'BC2', txCoin2, <pkB1, pk(ltkA1), hash, pkA3>, pkB2, 
+                        timelock_B>,
+                       ltkA1)
+   ),
+   Alice_sign( 'BC2', txCoin2, hash, timelock_B )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Alice_1:
+   [
+   !CoinOnBlock( 'BC1', '0', '0', pk(ltkA), tx, t ),
+   !Timelock( timelock_A ), Fr( ~hsk ),
+   HTLC( A, B, pk(ltkA1), pk(ltkA2), pkA3, pkB1, pkB2, pkB3 )
+   ]
+  --[ Alice_1( HTLChash(~hsk) ), Alice_1( '1' ) ]->
+   [
+   Coin1_Not_Pub( <'BC1', tx, 
+                   sign(<'BC1', tx, pk(ltkA), pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+                        ltkA), 
+                   pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+                  <
+                   TXhash(<tx, 
+                           sign(<'BC1', tx, pk(ltkA), pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+                                ltkA), 
+                           pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>), 
+                   ~hsk, timelock_A>
+   ),
+   Coin5_noSig( 'BC1',
+                TXhash(<tx, 
+                        sign(<'BC1', tx, pk(ltkA), pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+                             ltkA), 
+                        pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>),
+                <pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>, pk(ltkA2), timelock_A
+   ),
+   Adv_Out( <'BC1', tx, 
+             sign(<'BC1', tx, pk(ltkA), pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+                  ltkA), 
+             pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+            <
+             TXhash(<tx, 
+                     sign(<'BC1', tx, pk(ltkA), pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>,
+                          ltkA), 
+                     pk(ltkA1), pkB1, HTLChash(~hsk), pkB3>), 
+             ~hsk, timelock_A>,
+            pk(ltkA2)
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Alice_2:
+   [
+   Coin1_Not_Pub( <'BC1', tx, SigA, pk(ltkA1), pkB1, hash, pkB3>,
+                  <txCoin1, hsk, timelock_A>
+   ),
+   Coin5_withSig( 'BC1', txCoin1, <pk(ltkA1), pkB1, hash, pkB3>, pkA2,
+                  timelock_A, SigB1
+   )[+]
+   ]
+  --[
+  Eq( verify(SigB1,
+             <'BC1', txCoin1, <pk(ltkA1), pkB1, hash, pkB3>, pkA2, timelock_A>,
+             pkB1),
+      true
+  ),
+  Alice_2( '1' )
+  ]->
+   [
+   Out( <tx, SigA, pk(ltkA1), pkB1, hash, pkB3> ),
+   Out( <txCoin1, 
+         <
+          sign(<'BC1', txCoin1, <pk(ltkA1), pkB1, hash, pkB3>, pkA2, 
+                timelock_A>,
+               ltkA1), 
+          SigB1>, 
+         pkA2, timelock_A>
+   )
+   ]
+
+  /*
+  rule (modulo AC) Alice_2:
+     [
+     Coin1_Not_Pub( <'BC1', tx, SigA, pk(ltkA1), pkB1, hash, pkB3>,
+                    <txCoin1, hsk, timelock_A>
+     ),
+     Coin5_withSig( 'BC1', txCoin1, <pk(ltkA1), pkB1, hash, pkB3>, pkA2,
+                    timelock_A, SigB1
+     )[+]
+     ]
+    --[ Eq( z, true ), Alice_2( '1' ) ]->
+     [
+     Out( <tx, SigA, pk(ltkA1), pkB1, hash, pkB3> ),
+     Out( <txCoin1, 
+           <
+            sign(<'BC1', txCoin1, <pk(ltkA1), pkB1, hash, pkB3>, pkA2, 
+                  timelock_A>,
+                 ltkA1), 
+            SigB1>, 
+           pkA2, timelock_A>
+     )
+     ]
+    variants (modulo AC)
+    1. SigB1 = SigB1.24
+       hash  = hash.25
+       ltkA1 = ltkA1.27
+       pkA2  = pkA2.28
+       pkB1  = pkB1.29
+       pkB3  = pkB3.30
+       timelock_A
+             = timelock_A.31
+       txCoin1
+             = txCoin1.33
+       z     = verify(SigB1.24,
+                      <'BC1', txCoin1.33, <pk(ltkA1.27), pkB1.29, hash.25, pkB3.30>, 
+                       pkA2.28, timelock_A.31>,
+                      pkB1.29)
+    
+    2. SigB1 = sign(<'BC1', txCoin1.37, 
+                     <pk(ltkA1.31), pk(x.54), hash.29, pkB3.34>, pkA2.32, timelock_A.35
+                    >,
+                    x.54)
+       hash  = hash.29
+       ltkA1 = ltkA1.31
+       pkA2  = pkA2.32
+       pkB1  = pk(x.54)
+       pkB3  = pkB3.34
+       timelock_A
+             = timelock_A.35
+       txCoin1
+             = txCoin1.37
+       z     = true
+  */
+
+rule (modulo E) Alice_receive:
+   [
+   Alice_sign( 'BC2', txCoin2, HTLChash(hsk), timelock_B ),
+   !HCoinOnBlock( 'BC2', tx0, SigB0,
+                  <pkB1, pk(ltkA1), hash, pk(ltkA3)>, txCoin2, t
+   )[+],
+   !PK( A, pkA4 )
+   ]
+  --[ Alice_receive( txCoin2 ) ]->
+   [
+   Reveal( hsk ),
+   Out( <txCoin2, 
+         <hsk, 
+          sign(<'BC2', txCoin2, <pkB1, pk(ltkA1), hash, pk(ltkA3)>, pkA4>,
+               ltkA3)
+         >, 
+         pkA4>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) MaliciousAlice:
+   [
+   Adv_Out( <'BC1', tx, SigA, pk(ltkA1), pkB1, hash, pkB3>,
+            <txCoin1, hsk, timelock_A>, pk(ltkA2)
+   ),
+   !Timelock( timelock_Adv )
+   ]
+  --[ Adv( '1' ) ]->
+   [
+   Coin1_Not_Pub( <'BC1', tx, SigA, pk(ltkA1), pkB1, hash, pkB3>,
+                  <txCoin1, hsk, timelock_Adv>
+   ),
+   Coin5_noSig( 'BC1', txCoin1, <pk(ltkA1), pkB1, hash, pkB3>,
+                pk(ltkA2), timelock_Adv
+   )[+]
+   ]
+
+  /* has exactly the trivial AC variant */
+
+restriction oneAdv:
+  "âˆ€ #i #j. ((Adv( '1' ) @ #i) âˆ§ (Adv( '1' ) @ #j)) â‡’ (#i = #j)"
+  // safety formula
+
+lemma Alice:
+  exists-trace "âˆƒ #i. Alice_2( '1' ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ #i. (Alice_2( '1' ) @ #i)"
+*/
+by sorry
+
+lemma Alice11:
+  exists-trace "âˆƒ #i. Alice_1( '1' ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ #i. (Alice_1( '1' ) @ #i)"
+*/
+by sorry
+
+lemma Alice_3:
+  exists-trace
+  "âˆƒ tx #i #j. (Alice_receive( tx ) @ #i) âˆ§ (SpendHCoin( tx ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ tx #i #j. (Alice_receive( tx ) @ #i) âˆ§ (SpendHCoin( tx ) @ #j)"
+*/
+by sorry
+
+restriction OneAlice:
+  "âˆ€ hash1 hash2 #i1 #i2.
+    ((Alice_1( hash1 ) @ #i1) âˆ§ (Alice_1( hash2 ) @ #i2)) â‡’
+    (#i1 = #i2)"
+  // safety formula
+
+rule (modulo E) Bob_sign:
+   [
+   Coin5_noSig( 'BC1', txCoin1, <pkA1, pk(ltkB1), hash, pkB3>, pkA2,
+                timelock_A
+   )
+   ]
+  --[ Bob_sign( 'BC1', txCoin1, hash, timelock_A ) ]->
+   [
+   Coin5_withSig( 'BC1', txCoin1, <pkA1, pk(ltkB1), hash, pkB3>, pkA2,
+                  timelock_A,
+                  sign(<'BC1', txCoin1, <pkA1, pk(ltkB1), hash, pkB3>, pkA2, 
+                        timelock_A>,
+                       ltkB1)
+   ),
+   Bob_sign( 'BC1', txCoin1, hash, timelock_A ), Bob_3( txCoin1 )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Bob_1:
+   [
+   !CoinOnBlock( 'BC2', '0', '0', pk(ltkB), tx, t ),
+   Bob_sign( 'BC1', txCoin1, hash, ('1'+timelock_B) ),
+   HTLC( A, B, pkA1, pkA2, pkA3, pk(ltkB1), pk(ltkB2), pkB3 )
+   ]
+  --[ Bob_1( tx ) ]->
+   [
+   Coin2_Not_Publish( <'BC2', tx, 
+                       sign(<'BC2', tx, pk(ltkB), pk(ltkB1), pkA1, hash, pkA3>, ltkB), 
+                       pk(ltkB1), pkA1, hash, pkA3>,
+                      txCoin1,
+                      TXhash(<tx, 
+                              sign(<'BC2', tx, pk(ltkB), pk(ltkB1), pkA1, hash, pkA3>, ltkB), 
+                              pk(ltkB1), pkA1, hash, pkA3>),
+                      timelock_B
+   ),
+   Coin6_noSig( 'BC2',
+                TXhash(<tx, 
+                        sign(<'BC2', tx, pk(ltkB), pk(ltkB1), pkA1, hash, pkA3>, ltkB), 
+                        pk(ltkB1), pkA1, hash, pkA3>),
+                <pk(ltkB1), pkA1, hash, pkA3>, pk(ltkB2), timelock_B
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Bob_2:
+   [
+   !HCoinOnBlock( 'BC1', tx0, SigA0, <pkA1, pk(ltkB1), hash, pkB3>,
+                  txCoin1, t
+   ),
+   Coin6_withSig( 'BC2', txCoin2, <pk(ltkB1), pkA1, hash, pkA3>, pkB2,
+                  timelock_B, SigA1
+   ),
+   Coin2_Not_Publish( <'BC2', tx, SigB, pk(ltkB1), pkA1, hash, pkA3>,
+                      txCoin1, txCoin2, timelock_B
+   )[+]
+   ]
+  --[
+  Eq( verify(SigA1,
+             <'BC2', txCoin2, <pk(ltkB1), pkA1, hash, pkA3>, pkB2, timelock_B>,
+             pkA1),
+      true
+  ),
+  Bob_2( tx )
+  ]->
+   [
+   Out( <tx, SigB, pk(ltkB1), pkA1, hash, pkA3> ),
+   Out( <txCoin2, 
+         <
+          sign(<'BC2', txCoin2, <pk(ltkB1), pkA1, hash, pkA3>, pkB2, 
+                timelock_B>,
+               ltkB1), 
+          SigA1>, 
+         pkB2, timelock_B>
+   )
+   ]
+
+  /*
+  rule (modulo AC) Bob_2:
+     [
+     !HCoinOnBlock( 'BC1', tx0, SigA0, <pkA1, pk(ltkB1), hash, pkB3>,
+                    txCoin1, t
+     ),
+     Coin6_withSig( 'BC2', txCoin2, <pk(ltkB1), pkA1, hash, pkA3>, pkB2,
+                    timelock_B, SigA1
+     ),
+     Coin2_Not_Publish( <'BC2', tx, SigB, pk(ltkB1), pkA1, hash, pkA3>,
+                        txCoin1, txCoin2, timelock_B
+     )[+]
+     ]
+    --[ Eq( z, true ), Bob_2( tx ) ]->
+     [
+     Out( <tx, SigB, pk(ltkB1), pkA1, hash, pkA3> ),
+     Out( <txCoin2, 
+           <
+            sign(<'BC2', txCoin2, <pk(ltkB1), pkA1, hash, pkA3>, pkB2, 
+                  timelock_B>,
+                 ltkB1), 
+            SigA1>, 
+           pkB2, timelock_B>
+     )
+     ]
+    variants (modulo AC)
+    1. SigA1 = SigA1.33
+       hash  = hash.35
+       ltkB1 = ltkB1.36
+       pkA1  = pkA1.37
+       pkA3  = pkA3.38
+       pkB2  = pkB2.39
+       timelock_B
+             = timelock_B.42
+       txCoin2
+             = txCoin2.46
+       z     = verify(SigA1.33,
+                      <'BC2', txCoin2.46, <pk(ltkB1.36), pkA1.37, hash.35, pkA3.38>, 
+                       pkB2.39, timelock_B.42>,
+                      pkA1.37)
+    
+    2. SigA1 = sign(<'BC2', txCoin2.48, 
+                     <pk(ltkB1.38), pk(x.69), hash.37, pkA3.40>, pkB2.41, timelock_B.44
+                    >,
+                    x.69)
+       hash  = hash.37
+       ltkB1 = ltkB1.38
+       pkA1  = pk(x.69)
+       pkA3  = pkA3.40
+       pkB2  = pkB2.41
+       timelock_B
+             = timelock_B.44
+       txCoin2
+             = txCoin2.48
+       z     = true
+  */
+
+rule (modulo E) Bob_receive:
+   [
+   Bob_3( txCoin1 ), Reveal( hsk ),
+   !HCoinOnBlock( 'BC1', tx0, SigA0, <pkA1, pkB1, hash, pk(ltkB3)>,
+                  txCoin1, t
+   ),
+   !PK( B, pkB4 )
+   ]
+  --[ Bob_receive( txCoin1 ) ]->
+   [
+   Out( <txCoin1, 
+         <hsk, 
+          sign(<'BC1', txCoin1, <pkA1, pkB1, hash, pk(ltkB3)>, pkB4>, ltkB3)
+         >, 
+         pkB4>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+lemma Bob_3_receive:
+  exists-trace
+  "âˆƒ tx #i #j. (Bob_receive( tx ) @ #i) âˆ§ (Spend( tx ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ tx #i #j. (Bob_receive( tx ) @ #i) âˆ§ (Spend( tx ) @ #j)"
+*/
+by sorry
+
+lemma Bob_2_execu:
+  exists-trace
+  "âˆƒ BC tx #j #k.
+    ((Bob_2( tx ) @ #j) âˆ§ (Coin2Hcoin( BC, '1', ('1'+'1') ) @ #k)) âˆ§
+    (Spend( tx ) @ #k)"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ BC tx #j #k.
+  (Bob_2( tx ) @ #j) âˆ§
+  (Coin2Hcoin( BC, '1', ('1'+'1') ) @ #k) âˆ§
+  (Spend( tx ) @ #k)"
+*/
+by sorry
+
+lemma Bob_2:
+  exists-trace "âˆƒ tx #i. Bob_2( tx ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ tx #i. (Bob_2( tx ) @ #i)"
+*/
+by sorry
+
+lemma Bob_1:
+  exists-trace "âˆƒ tx #i. Bob_1( tx ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ tx #i. (Bob_1( tx ) @ #i)"
+*/
+by sorry
+
+lemma BC2lamma:
+  exists-trace "âˆƒ #i. Coin2Hcoin( 'BC2', '1', ('1'+'1') ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ #i. (Coin2Hcoin( 'BC2', '1', ('1'+'1') ) @ #i)"
+*/
+by sorry
+
+lemma Alice_no_early_redeem:
+  all-traces
+  "âˆ€ txAcom hash timelock_A #i1 CoinA input output t1 #i2 t2 #i3 #i4.
+    ((((Bob_sign( 'BC1', txAcom, hash, timelock_A ) @ #i1) âˆ§
+       (!HCoinOnBlock( 'BC1', CoinA, input, output, txAcom, t1 ) @ #i2)) âˆ§
+      (HTimecoin2coin( 'BC1', txAcom, t2 ) @ #i3)) âˆ§
+     (LedgerTik( 'BC1', ('1'+t1+timelock_A) ) @ #i4)) â‡’
+    (Â¬(âˆƒ x. ('1'+t1+timelock_A) = (t2+x)))"
+/*
+guarded formula characterizing all counter-examples:
+"âˆƒ txAcom hash timelock_A #i1 CoinA input output t1 #i2 t2 #i3 #i4.
+  (Bob_sign( 'BC1', txAcom, hash, timelock_A ) @ #i1) âˆ§
+  (!HCoinOnBlock( 'BC1', CoinA, input, output, txAcom, t1 ) @ #i2) âˆ§
+  (HTimecoin2coin( 'BC1', txAcom, t2 ) @ #i3) âˆ§
+  (LedgerTik( 'BC1', ('1'+t1+timelock_A) ) @ #i4)
+ âˆ§
+  âˆƒ x. (('1'+t1+timelock_A) = (t2+x))"
+*/
+simplify
+  case 1
+  by sorry /* removed */
+next
+  case 10
+  by sorry /* removed */
+next
+  case 11
+  by sorry /* removed */
+next
+  case 12
+  by sorry /* removed */
+next
+  case 13
+  by sorry /* removed */
+next
+  case 14
+  by sorry /* removed */
+next
+  case 15
+  by sorry /* removed */
+next
+  case 16
+  by sorry /* removed */
+next
+  case 17
+  by sorry /* removed */
+next
+  case 18
+  by sorry /* removed */
+next
+  case 19
+  by sorry /* removed */
+next
+  case 2
+  by sorry /* removed */
+next
+  case 20
+  by sorry /* removed */
+next
+  case 21
+  by sorry /* removed */
+next
+  case 22
+  by sorry /* removed */
+next
+  case 23
+  by sorry /* removed */
+next
+  case 24
+  by sorry /* removed */
+next
+  case 25
+  by sorry /* removed */
+next
+  case 26
+  by sorry /* removed */
+next
+  case 27
+  by sorry /* removed */
+next
+  case 28
+  by sorry /* removed */
+next
+  case 29
+  by sorry /* removed */
+next
+  case 3
+  by sorry /* removed */
+next
+  case 30
+  by sorry /* removed */
+next
+  case 31
+  by sorry /* removed */
+next
+  case 32
+  by sorry /* removed */
+next
+  case 33
+  by sorry /* removed */
+next
+  case 34
+  by sorry /* removed */
+next
+  case 35
+  by sorry /* removed */
+next
+  case 36
+  by sorry /* removed */
+next
+  case 37
+  by sorry /* removed */
+next
+  case 38
+  by sorry /* removed */
+next
+  case 39
+  by sorry /* removed */
+next
+  case 4
+  by sorry /* removed */
+next
+  case 40
+  by sorry /* removed */
+next
+  case 41
+  by sorry /* removed */
+next
+  case 42
+  by sorry /* removed */
+next
+  case 43
+  by sorry /* removed */
+next
+  case 44
+  by sorry /* removed */
+next
+  case 45
+  by sorry /* removed */
+next
+  case 46
+  by sorry /* removed */
+next
+  case 47
+  by sorry /* removed */
+next
+  case 48
+  by sorry /* removed */
+next
+  case 49
+  by sorry /* removed */
+next
+  case 5
+  by sorry /* removed */
+next
+  case 50
+  by sorry /* removed */
+next
+  case 51
+  by sorry /* removed */
+next
+  case 52
+  by sorry /* removed */
+next
+  case 53
+  by sorry /* removed */
+next
+  case 54
+  by sorry /* removed */
+next
+  case 55
+  by sorry /* removed */
+next
+  case 56
+  by sorry
+next
+  case 57
+  by sorry
+next
+  case 58
+  by sorry
+next
+  case 59
+  by sorry
+next
+  case 6
+  by sorry /* removed */
+next
+  case 60
+  by sorry
+next
+  case 61
+  by sorry
+next
+  case 62
+  by sorry
+next
+  case 63
+  solve( Bob_sign( 'BC1',
+                   TXhash(<CoinA, 
+                           sign(<'BC1', CoinA, pk(x), pkA, pkB, hash, pkC>, x), pkA, pkB, 
+                           hash, pkC>),
+                   hash.1, (x.2+x.3)
+         ) @ #i1 )
+    case Bob_sign
+    solve( Coin5_noSig( 'BC1',
+                        TXhash(<CoinA, 
+                                sign(<'BC1', CoinA, pk(x), pkA, pkB, hash, pkC>, x), pkA, pkB, 
+                                hash, pkC>),
+                        <pkA1, pk(ltkB1), hash.1, pkB3>, pkA2, (x.1+x.2)
+           ) â–¶â‚€ #i1 )
+      case Alice_1_case_01
+      by sorry
+    next
+      case Alice_1_case_02
+      by sorry
+    next
+      case Alice_1_case_03
+      by sorry
+    next
+      case Alice_1_case_04
+      by sorry
+    next
+      case Alice_1_case_05
+      by sorry
+    next
+      case Alice_1_case_06
+      by sorry
+    next
+      case Alice_1_case_07
+      by sorry
+    next
+      case Alice_1_case_08
+      by sorry
+    next
+      case Alice_1_case_09
+      by sorry
+    next
+      case Alice_1_case_10
+      by sorry
+    next
+      case Alice_1_case_11
+      by sorry
+    next
+      case Alice_1_case_12
+      by sorry
+    next
+      case MaliciousAlice_case_01
+      by sorry
+    next
+      case MaliciousAlice_case_02
+      by sorry
+    next
+      case MaliciousAlice_case_03
+      by sorry
+    next
+      case MaliciousAlice_case_04
+      by sorry
+    next
+      case MaliciousAlice_case_05
+      by sorry
+    next
+      case MaliciousAlice_case_06
+      by sorry
+    next
+      case MaliciousAlice_case_07
+      by sorry
+    next
+      case MaliciousAlice_case_08
+      by sorry
+    next
+      case MaliciousAlice_case_09
+      solve( !CoinOnBlock( 'BC1', txPrevious, SigPre, pk(~ltkA), ~n,
+                           LedgerTik
+             ) â–¶â‚€ #i2 )
+        case Block_MineCoin
+        solve( HTimecoin2coin( 'BC1',
+                               TXhash(<~n, 
+                                       sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                             HTLChash(~hsk), pk(~ltkA.3)>,
+                                            ~ltkA), 
+                                       pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>),
+                               ('1'+'1'+'1'+'1'+x)
+               ) @ #i3 )
+          case Block_HCoin2Coin_case_01
+          solve( !HCoinOnBlock( 'BC1', tx0, SigA_0,
+                                <pk(x.1), pk(x.2), hash, pkB3>,
+                                TXhash(<~n, 
+                                        sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                              HTLChash(~hsk), pk(~ltkA.3)>,
+                                             ~ltkA), 
+                                        pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>),
+                                ('1'+'1')
+                 )[+] â–¶â‚€ #i3 )
+            case Block_Coin2HCoin
+            by sorry
+          qed
+        next
+          case Block_HCoin2Coin_case_02
+          by sorry
+        next
+          case Block_HCoin2Coin_case_03
+          by sorry
+        next
+          case Block_HCoin2Coin_case_04
+          by sorry
+        next
+          case Block_HCoin2Coin_case_05
+          by sorry
+        next
+          case Block_HCoin2Coin_case_06
+          by sorry
+        next
+          case Block_HCoin2Coin_case_07
+          solve( !KU( sign(<'BC1', 
+                            TXhash(<~n, 
+                                    sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                          HTLChash(~hsk), pk(~ltkA.3)>,
+                                         ~ltkA), 
+                                    pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>), 
+                            <pk(x.1), pk(x.2), hash, pkB3>, PKaddress, ('1'+'1')>,
+                           x.1)
+                 )[+] @ #vk.15 )
+            case Alice_2_case_1
+            solve( !HCoinOnBlock( 'BC1', tx0, SigA_0,
+                                  <pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>,
+                                  TXhash(<~n.1, 
+                                          sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                                HTLChash(~hsk), pk(~ltkA.3)>,
+                                               ~ltkA), 
+                                          pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>),
+                                  ('1'+'1')
+                   )[+] â–¶â‚€ #i3 )
+              case Block_Coin2HCoin
+              solve( !KU( TXhash(<~n.1, 
+                                  sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                        HTLChash(~hsk), pk(~ltkA.3)>,
+                                       ~ltkA), 
+                                  pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>)
+                     )[+] @ #vk.14 )
+                case Alice_2_case_1
+                solve( !KU( sign(<'BC1', 
+                                  TXhash(<~n.1, 
+                                          sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                                HTLChash(~hsk), pk(~ltkA.3)>,
+                                               ~ltkA), 
+                                          pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>), 
+                                  <pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>, 
+                                  pk(~ltkA.4), ('1'+'1')>,
+                                 ~ltkA.2)
+                       )[+] @ #vk.16 )
+                  case Alice_2_case_1
+                  by contradiction /* from formulas */
+                next
+                  case Alice_2_case_2
+                  solve( !KU( sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), 
+                                    pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>,
+                                   ~ltkA)
+                         ) @ #vk.9 )
+                    case Alice_2_case_1
+                    solve( !KU( pk(~ltkA.4) )[+] @ #vk.18 )
+                      case Alice_2_case_1
+                      by contradiction /* from formulas */
+                    next
+                      case Alice_2_case_2
+                      by contradiction /* from formulas */
+                    next
+                      case Alice_2_case_3
+                      by contradiction /* from formulas */
+                    next
+                      case Alice_2_case_4
+                      solve( LedgerTik( 'BC1', ('1'+'1'+'1'+'1'+'1') ) â–¶â‚‚ #i3 )
+                        case Tik
+                        solve( !PK( A, pkA ) â–¶â‚ #i )
+                          case address_register
+                          solve( LedgerTik( 'BC1', '1' ) â–¶â‚‚ #i )
+                            case Tik_start
+                            solve( LedgerTik( 'BC1', ('1'+'1'+'1'+'1'+'1'+'1') ) @ #i4 )
+                              case Tik
+                              solve( !KU( ~n ) @ #vk.11 )
+                                case Alice_2
+                                solve( !KU( pk(~ltkA.1) ) @ #vk.13 )
+                                  case Alice_2_case_1
+                                  solve( !KU( pk(~ltkA.2) ) @ #vk.15 )
+                                    case Alice_2_case_1
+                                    solve( Tik( 'BC1', '1' ) â–¶â‚€ #vr.19 )
+                                      case Tik_start
+                                      solve( !KU( HTLChash(~hsk) ) @ #vk.17 )
+                                        case Alice_2
+                                        solve( !KU( pk(~ltkA.3) ) @ #vk.18 )
+                                          case Alice_2_case_1
+                                          by contradiction /* from formulas */
+                                        next
+                                          case Alice_2_case_2
+                                          by contradiction /* from formulas */
+                                        next
+                                          case Alice_2_case_3
+                                          solve( Tik( 'BC1', ('1'+'1'+'1'+'1') ) â–¶â‚€ #vr.26 )
+                                            case Tik
+                                            solve( Tik( 'BC1', ('1'+'1'+'1'+'1'+'1') ) â–¶â‚€ #i4 )
+                                              case Tik
+                                              solve( Tik( 'BC1', ('1'+'1'+'1') ) â–¶â‚€ #vr.35 )
+                                                case Tik
+                                                solve( Tik( 'BC1', ('1'+'1') ) â–¶â‚€ #vr.36 )
+                                                  case Tik
+                                                  SOLVED // trace found
+                                                qed
+                                              qed
+                                            qed
+                                          qed
+                                        next
+                                          case Alice_2_case_4
+                                          by contradiction /* from formulas */
+                                        next
+                                          case Alice_receive_case_1
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_2
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_3
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_4
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_5
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_6
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_7
+                                          by sorry
+                                        next
+                                          case Alice_receive_case_8
+                                          by sorry
+                                        next
+                                          case Block_MineCoin_case_1
+                                          by sorry
+                                        next
+                                          case Block_MineCoin_case_2
+                                          by sorry
+                                        next
+                                          case Block_MineCoin_case_3
+                                          by sorry
+                                        next
+                                          case Bob_2_case_1
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_2
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_3
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_4
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_5
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_6
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_7
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_2_case_8
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_01
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_02
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_03
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_04
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_05
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_06
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_07
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_08
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_09
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_10
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_11
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_12
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_13
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_14
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_15
+                                          by contradiction /* cyclic */
+                                        next
+                                          case Bob_receive_case_16
+                                          by contradiction /* cyclic */
+                                        next
+                                          case address_register
+                                          by sorry
+                                        next
+                                          case c_pk
+                                          by contradiction /* from formulas */
+                                        next
+                                          case creatCointoCoin_case_1
+                                          by sorry
+                                        next
+                                          case creatCointoCoin_case_2
+                                          by sorry
+                                        next
+                                          case creatCointoCoin_case_3
+                                          by sorry
+                                        qed
+                                      next
+                                        case c_HTLChash
+                                        by sorry
+                                      qed
+                                    qed
+                                  next
+                                    case Alice_2_case_2
+                                    by contradiction /* from formulas */
+                                  next
+                                    case Alice_2_case_3
+                                    by contradiction /* from formulas */
+                                  next
+                                    case Alice_receive_case_1
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_2
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_3
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_4
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_5
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_6
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_7
+                                    by sorry
+                                  next
+                                    case Alice_receive_case_8
+                                    by sorry
+                                  next
+                                    case Block_MineCoin_case_1
+                                    by sorry
+                                  next
+                                    case Block_MineCoin_case_2
+                                    by sorry
+                                  next
+                                    case Block_MineCoin_case_3
+                                    by sorry
+                                  next
+                                    case Bob_2_case_01
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_02
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_03
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_04
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_05
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_06
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_07
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_08
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_09
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_10
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_11
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_12
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_13
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_14
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_15
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_2_case_16
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_01
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_02
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_03
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_04
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_05
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_06
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_07
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_08
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_09
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_10
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_11
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_12
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_13
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_14
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_15
+                                    by contradiction /* cyclic */
+                                  next
+                                    case Bob_receive_case_16
+                                    by contradiction /* cyclic */
+                                  next
+                                    case address_register
+                                    by sorry
+                                  next
+                                    case c_pk
+                                    by contradiction /* from formulas */
+                                  next
+                                    case creatCointoCoin_case_1
+                                    by sorry
+                                  next
+                                    case creatCointoCoin_case_2
+                                    by sorry
+                                  next
+                                    case creatCointoCoin_case_3
+                                    by sorry
+                                  qed
+                                next
+                                  case Alice_2_case_2
+                                  by contradiction /* from formulas */
+                                next
+                                  case Alice_2_case_3
+                                  by contradiction /* from formulas */
+                                next
+                                  case Alice_receive_case_1
+                                  by sorry
+                                next
+                                  case Alice_receive_case_2
+                                  by sorry
+                                next
+                                  case Alice_receive_case_3
+                                  by sorry
+                                next
+                                  case Alice_receive_case_4
+                                  by sorry
+                                next
+                                  case Alice_receive_case_5
+                                  by sorry
+                                next
+                                  case Alice_receive_case_6
+                                  by sorry
+                                next
+                                  case Alice_receive_case_7
+                                  by sorry
+                                next
+                                  case Alice_receive_case_8
+                                  by sorry
+                                next
+                                  case Block_MineCoin_case_1
+                                  by sorry
+                                next
+                                  case Block_MineCoin_case_2
+                                  by sorry
+                                next
+                                  case Block_MineCoin_case_3
+                                  by sorry
+                                next
+                                  case Bob_2_case_01
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_02
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_03
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_04
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_05
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_06
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_07
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_08
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_09
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_10
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_11
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_12
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_13
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_14
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_15
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_2_case_16
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_01
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_02
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_03
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_04
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_05
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_06
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_07
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_08
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_09
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_10
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_11
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_12
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_13
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_14
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_15
+                                  by contradiction /* cyclic */
+                                next
+                                  case Bob_receive_case_16
+                                  by contradiction /* cyclic */
+                                next
+                                  case address_register
+                                  by sorry
+                                next
+                                  case c_pk
+                                  by contradiction /* from formulas */
+                                next
+                                  case creatCointoCoin_case_1
+                                  by sorry
+                                next
+                                  case creatCointoCoin_case_2
+                                  by sorry
+                                next
+                                  case creatCointoCoin_case_3
+                                  by sorry
+                                qed
+                              next
+                                case Block_MineCoin
+                                by sorry
+                              next
+                                case creatCointoCoin
+                                by sorry
+                              qed
+                            qed
+                          qed
+                        qed
+                      qed
+                    next
+                      case Alice_2_case_5
+                      by sorry
+                    next
+                      case Alice_receive_case_1
+                      by sorry
+                    next
+                      case Alice_receive_case_2
+                      by sorry
+                    next
+                      case Alice_receive_case_3
+                      by sorry
+                    next
+                      case Alice_receive_case_4
+                      by sorry
+                    next
+                      case Alice_receive_case_5
+                      by sorry
+                    next
+                      case Alice_receive_case_6
+                      by sorry
+                    next
+                      case Alice_receive_case_7
+                      by sorry
+                    next
+                      case Alice_receive_case_8
+                      by sorry
+                    next
+                      case Block_MineCoin_case_1
+                      by sorry
+                    next
+                      case Block_MineCoin_case_2
+                      by sorry
+                    next
+                      case Block_MineCoin_case_3
+                      by sorry
+                    next
+                      case Bob_2_case_01
+                      by sorry
+                    next
+                      case Bob_2_case_02
+                      by sorry
+                    next
+                      case Bob_2_case_03
+                      by sorry
+                    next
+                      case Bob_2_case_04
+                      by sorry
+                    next
+                      case Bob_2_case_05
+                      by sorry
+                    next
+                      case Bob_2_case_06
+                      by sorry
+                    next
+                      case Bob_2_case_07
+                      by sorry
+                    next
+                      case Bob_2_case_08
+                      by sorry
+                    next
+                      case Bob_2_case_09
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_10
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_11
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_12
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_13
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_14
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_15
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_2_case_16
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_receive_case_01
+                      by sorry
+                    next
+                      case Bob_receive_case_02
+                      by sorry
+                    next
+                      case Bob_receive_case_03
+                      by sorry
+                    next
+                      case Bob_receive_case_04
+                      by sorry
+                    next
+                      case Bob_receive_case_05
+                      by sorry
+                    next
+                      case Bob_receive_case_06
+                      by sorry
+                    next
+                      case Bob_receive_case_07
+                      by sorry
+                    next
+                      case Bob_receive_case_08
+                      by sorry
+                    next
+                      case Bob_receive_case_09
+                      by sorry
+                    next
+                      case Bob_receive_case_10
+                      by sorry
+                    next
+                      case Bob_receive_case_11
+                      by sorry
+                    next
+                      case Bob_receive_case_12
+                      by sorry
+                    next
+                      case Bob_receive_case_13
+                      by sorry
+                    next
+                      case Bob_receive_case_14
+                      by sorry
+                    next
+                      case Bob_receive_case_15
+                      by sorry
+                    next
+                      case Bob_receive_case_16
+                      by sorry
+                    next
+                      case address_register
+                      by sorry
+                    next
+                      case c_pk
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_1
+                      by sorry
+                    next
+                      case creatCointoCoin_case_2
+                      by sorry
+                    next
+                      case creatCointoCoin_case_3
+                      by sorry
+                    qed
+                  next
+                    case Alice_2_case_2
+                    by sorry
+                  next
+                    case c_sign
+                    by contradiction /* from formulas */
+                  qed
+                next
+                  case c_sign
+                  by contradiction /* from formulas */
+                qed
+              next
+                case Alice_2_case_2
+                by sorry
+              next
+                case Bob_receive_case_01
+                by sorry
+              next
+                case Bob_receive_case_02
+                by sorry
+              next
+                case Bob_receive_case_03
+                by sorry
+              next
+                case Bob_receive_case_04
+                by sorry
+              next
+                case Bob_receive_case_05
+                by sorry
+              next
+                case Bob_receive_case_06
+                by sorry
+              next
+                case Bob_receive_case_07
+                by sorry
+              next
+                case Bob_receive_case_08
+                by sorry
+              next
+                case Bob_receive_case_09
+                by sorry
+              next
+                case Bob_receive_case_10
+                by sorry
+              next
+                case Bob_receive_case_11
+                by sorry
+              next
+                case Bob_receive_case_12
+                by sorry
+              next
+                case Bob_receive_case_13
+                by sorry
+              next
+                case Bob_receive_case_14
+                by sorry
+              next
+                case Bob_receive_case_15
+                by sorry
+              next
+                case Bob_receive_case_16
+                by sorry
+              next
+                case c_TXhash
+                by sorry
+              qed
+            qed
+          next
+            case Alice_2_case_2
+            by contradiction /* from formulas */
+          next
+            case c_sign
+            by sorry
+          qed
+        next
+          case Block_HCoin2Coin_case_08
+          by sorry
+        next
+          case Block_HCoin2Coin_case_09
+          by sorry
+        next
+          case Block_HCoin2Coin_case_10
+          by sorry
+        next
+          case Block_HCoin2Coin_case_11
+          by sorry
+        next
+          case Block_HCoin2Coin_case_12
+          by sorry
+        next
+          case Block_HCoin2Coin_case_13
+          by sorry
+        next
+          case Block_HCoin2Coin_case_14
+          by sorry
+        next
+          case Block_HCoin2Coin_case_15
+          by sorry
+        next
+          case Block_HCoin2Coin_case_16
+          by sorry
+        next
+          case Block_HCoin2Coin_case_17
+          by sorry
+        next
+          case Block_HCoin2Coin_case_18
+          by sorry
+        next
+          case Block_HCoin2Coin_case_19
+          by sorry
+        next
+          case Block_HCoin2Coin_case_20
+          by sorry
+        next
+          case Block_HCoin2Coin_case_21
+          by sorry
+        next
+          case Block_HCoin2Coin_case_22
+          by sorry
+        next
+          case Block_HCoin2Coin_case_23
+          by sorry
+        next
+          case Block_HCoin2Coin_case_24
+          by sorry
+        next
+          case Block_HCoin2Coin_case_25
+          by sorry
+        next
+          case Block_HCoin2Coin_case_26
+          by sorry
+        next
+          case Block_HCoin2Coin_case_27
+          by sorry
+        next
+          case Block_HCoin2Coin_case_28
+          by sorry
+        next
+          case Block_HCoin2Coin_case_29
+          by sorry
+        next
+          case Block_HCoin2Coin_case_30
+          by sorry
+        next
+          case Block_HCoin2Coin_case_31
+          by sorry
+        next
+          case Block_HCoin2Coin_case_32
+          by sorry
+        next
+          case Block_HCoin2Coin_case_33
+          by sorry
+        next
+          case Block_HCoin2Coin_case_34
+          by sorry
+        next
+          case Block_HCoin2Coin_case_35
+          by sorry
+        next
+          case Block_HCoin2Coin_case_36
+          by sorry
+        next
+          case Block_HCoin2Coin_case_37
+          by sorry
+        qed
+      qed
+    next
+      case MaliciousAlice_case_10
+      by sorry
+    next
+      case MaliciousAlice_case_11
+      by sorry
+    next
+      case MaliciousAlice_case_12
+      by sorry
+    next
+      case MaliciousAlice_case_13
+      by sorry
+    next
+      case MaliciousAlice_case_14
+      by sorry
+    next
+      case MaliciousAlice_case_15
+      by sorry
+    next
+      case MaliciousAlice_case_16
+      by sorry
+    next
+      case MaliciousAlice_case_17
+      by sorry
+    next
+      case MaliciousAlice_case_18
+      by sorry
+    next
+      case MaliciousAlice_case_19
+      by sorry
+    next
+      case MaliciousAlice_case_20
+      by sorry
+    next
+      case MaliciousAlice_case_21
+      by sorry
+    next
+      case MaliciousAlice_case_22
+      by sorry
+    next
+      case MaliciousAlice_case_23
+      by sorry
+    next
+      case MaliciousAlice_case_24
+      by sorry
+    qed
+  qed
+next
+  case 64
+  by sorry /* removed */
+next
+  case 65
+  by sorry
+next
+  case 66
+  by sorry
+next
+  case 7
+  by sorry /* removed */
+next
+  case 8
+  by sorry /* removed */
+next
+  case 9
+  by sorry /* removed */
+qed
+
+lemma Test_malicious:
+  exists-trace
+  "âˆƒ txAcom hash #i1 CoinA input output #i2 t2 #i3 #i4 #i5 x.
+    ((((((Bob_sign( 'BC1', txAcom, hash, ('1'+'1') ) @ #i1) âˆ§
+         (Bob_sign( 'BC1', txAcom, hash, ('1'+'1'+'1') ) @ #i5)) âˆ§
+        (!HCoinOnBlock( 'BC1', CoinA, input, output, txAcom, ('1'+'1')
+         ) @ #i2)) âˆ§
+       (HTimecoin2coin( 'BC1', txAcom, t2 ) @ #i3)) âˆ§
+      (LedgerTik( 'BC1', ('1'+'1'+'1'+'1'+'1'+'1') ) @ #i4)) âˆ§
+     ((t2+x) = ('1'+'1'+'1'+'1'+'1'+'1'))) âˆ§
+    (Â¬(âˆƒ #i6. Bob_receive( txAcom ) @ #i6))"
+/*
+guarded formula characterizing all satisfying traces:
+"âˆƒ txAcom hash #i1 CoinA input output #i2 t2 #i3 #i4 #i5 x.
+  (Bob_sign( 'BC1', txAcom, hash, ('1'+'1') ) @ #i1) âˆ§
+  (Bob_sign( 'BC1', txAcom, hash, ('1'+'1'+'1') ) @ #i5) âˆ§
+  (!HCoinOnBlock( 'BC1', CoinA, input, output, txAcom, ('1'+'1')
+   ) @ #i2) âˆ§
+  (HTimecoin2coin( 'BC1', txAcom, t2 ) @ #i3) âˆ§
+  (LedgerTik( 'BC1', ('1'+'1'+'1'+'1'+'1'+'1') ) @ #i4) âˆ§
+  ((t2+x) = ('1'+'1'+'1'+'1'+'1'+'1'))
+ âˆ§
+  âˆ€ #i6. (Bob_receive( txAcom ) @ #i6) â‡’ âŠ¥"
+*/
+simplify
+  case 1
+  by sorry
+next
+  case 2
+  by sorry
+next
+  case 3
+  by sorry
+next
+  case 4
+  solve( Bob_sign( 'BC1', txAcom, hash, ('1'+'1') ) @ #i1 )
+    case Bob_sign
+    solve( Coin5_noSig( 'BC1', txAcom, <pkA1, pk(ltkB1), hash, pkB3>,
+                        pkA2, ('1'+'1')
+           ) â–¶â‚€ #i1 )
+      case Alice_1_case_1
+      solve( Bob_sign( 'BC1',
+                       TXhash(<~n, 
+                               sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                     HTLChash(~hsk), pk(~ltkA.3)>,
+                                    ~ltkA), 
+                               pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>),
+                       HTLChash(~hsk), ('1'+'1'+'1')
+             ) @ #i5 )
+        case Bob_sign
+        solve( Coin5_noSig( 'BC1',
+                            TXhash(<~n, 
+                                    sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                          HTLChash(~hsk), pk(~ltkA.3)>,
+                                         ~ltkA), 
+                                    pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>),
+                            <pkA1, pk(ltkB1), HTLChash(~hsk), pkB3>, pkA2, ('1'+'1'+'1')
+               ) â–¶â‚€ #i5 )
+          case MaliciousAlice
+          solve( !HCoinOnBlock( 'BC1', CoinA, input, output,
+                                TXhash(<~n, 
+                                        sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                              HTLChash(~hsk), pk(~ltkA.3)>,
+                                             ~ltkA), 
+                                        pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>),
+                                ('1'+'1')
+                 ) @ #i2 )
+            case Block_Coin2HCoin
+            solve( !CoinOnBlock( 'BC1', txPrevious, SigPre, pk(~ltkA), ~n, '1'
+                   ) â–¶â‚€ #i2 )
+              case Block_MineCoin
+              solve( HTimecoin2coin( 'BC1',
+                                     TXhash(<~n, 
+                                             sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                                   HTLChash(~hsk), pk(~ltkA.3)>,
+                                                  ~ltkA), 
+                                             pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)
+                                            >),
+                                     ('1'+'1'+'1'+'1'+'1')
+                     ) @ #i3 )
+                case Block_HCoin2Coin_case_1
+                by sorry
+              next
+                case Block_HCoin2Coin_case_2
+                by sorry
+              next
+                case Block_HCoin2Coin_case_3
+                solve( !KU( TXhash(<~n, 
+                                    sign(<'BC1', ~n, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                          HTLChash(~hsk), pk(~ltkA.3)>,
+                                         ~ltkA), 
+                                    pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>)
+                       )[+] @ #vk.12 )
+                  case Alice_2_case_1
+                  solve( !KU( sign(<'BC1', 
+                                    TXhash(<~n.1, 
+                                            sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), pk(~ltkA.2), 
+                                                  HTLChash(~hsk), pk(~ltkA.3)>,
+                                                 ~ltkA), 
+                                            pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)
+                                           >), 
+                                    <pk(x), pk(x.1), hash, pkB3>, PKaddress, ('1'+'1')>,
+                                   x)
+                         )[+] @ #vk.15 )
+                    case Alice_2_case_1
+                    solve( !HCoinOnBlock( 'BC1', tx0, SigA_0,
+                                          <pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>,
+                                          TXhash(<~n.1, 
+                                                  sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), 
+                                                        pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>,
+                                                       ~ltkA), 
+                                                  pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), 
+                                                  pk(~ltkA.3)>),
+                                          ('1'+'1')
+                           )[+] â–¶â‚€ #i3 )
+                      case Block_Coin2HCoin
+                      solve( !KU( sign(<'BC1', 
+                                        TXhash(<~n.1, 
+                                                sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), 
+                                                      pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>,
+                                                     ~ltkA), 
+                                                pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), 
+                                                pk(~ltkA.3)>), 
+                                        <pk(~ltkA.1), pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>, 
+                                        pk(~ltkA.4), ('1'+'1')>,
+                                       ~ltkA.2)
+                             )[+] @ #vk.16 )
+                        case Alice_2_case_1
+                        by contradiction /* from formulas */
+                      next
+                        case Alice_2_case_2
+                        solve( !KU( sign(<'BC1', ~n.1, pk(~ltkA), pk(~ltkA.1), 
+                                          pk(~ltkA.2), HTLChash(~hsk), pk(~ltkA.3)>,
+                                         ~ltkA)
+                               ) @ #vk.9 )
+                          case Alice_2_case_1
+                          solve( !KU( pk(~ltkA.4) )[+] @ #vk.18 )
+                            case Alice_2_case_1
+                            by contradiction /* from formulas */
+                          next
+                            case Alice_2_case_2
+                            by contradiction /* from formulas */
+                          next
+                            case Alice_2_case_3
+                            by contradiction /* from formulas */
+                          next
+                            case Alice_2_case_4
+                            solve( LedgerTik( 'BC1', ('1'+'1'+'1'+'1'+'1') ) â–¶â‚‚ #i3 )
+                              case Tik
+                              solve( LedgerTik( 'BC1', ('1'+'1'+'1'+'1'+'1'+'1') ) @ #i4 )
+                                case Tik
+                                solve( LedgerTik( 'BC1', '1' ) â–¶â‚‚ #i )
+                                  case Tik_start
+                                  solve( !KU( ~n ) @ #vk.11 )
+                                    case Alice_2
+                                    solve( Tik( 'BC1', '1' ) â–¶â‚€ #vr.19 )
+                                      case Tik_start
+                                      solve( Tik( 'BC1', ('1'+'1'+'1'+'1') ) â–¶â‚€ #vr.25 )
+                                        case Tik
+                                        solve( Tik( 'BC1', ('1'+'1'+'1'+'1'+'1') ) â–¶â‚€ #i4 )
+                                          case Tik
+                                          solve( !KU( pk(~ltkA.1) ) @ #vk.13 )
+                                            case Alice_2_case_1
+                                            solve( !KU( pk(~ltkA.2) ) @ #vk.15 )
+                                              case Alice_2_case_1
+                                              solve( !KU( HTLChash(~hsk) ) @ #vk.17 )
+                                                case Alice_2
+                                                solve( Tik( 'BC1', ('1'+'1'+'1') ) â–¶â‚€ #vr.27 )
+                                                  case Tik
+                                                  solve( Tik( 'BC1', ('1'+'1') ) â–¶â‚€ #vr.34 )
+                                                    case Tik
+                                                    solve( !KU( pk(~ltkA.3) ) @ #vk.18 )
+                                                      case Alice_2_case_1
+                                                      by contradiction /* from formulas */
+                                                    next
+                                                      case Alice_2_case_2
+                                                      by contradiction /* from formulas */
+                                                    next
+                                                      case Alice_2_case_3
+                                                      SOLVED // trace found
+                                                    next
+                                                      case Alice_2_case_4
+                                                      by contradiction /* from formulas */
+                                                    next
+                                                      case Alice_receive_case_1
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_2
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_3
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_4
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_5
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_6
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_7
+                                                      by sorry
+                                                    next
+                                                      case Alice_receive_case_8
+                                                      by sorry
+                                                    next
+                                                      case Block_MineCoin_case_1
+                                                      SOLVED // trace found
+                                                    next
+                                                      case Block_MineCoin_case_2
+                                                      SOLVED // trace found
+                                                    next
+                                                      case Block_MineCoin_case_3
+                                                      by sorry
+                                                    next
+                                                      case Bob_2_case_1
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_2
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_3
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_4
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_5
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_6
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_7
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_2_case_8
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_01
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_02
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_03
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_04
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_05
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_06
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_07
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_08
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_09
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_10
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_11
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_12
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_13
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_14
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_15
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case Bob_receive_case_16
+                                                      by contradiction /* cyclic */
+                                                    next
+                                                      case address_register
+                                                      SOLVED // trace found
+                                                    next
+                                                      case c_pk
+                                                      by contradiction /* from formulas */
+                                                    next
+                                                      case creatCointoCoin_case_1
+                                                      SOLVED // trace found
+                                                    next
+                                                      case creatCointoCoin_case_2
+                                                      SOLVED // trace found
+                                                    next
+                                                      case creatCointoCoin_case_3
+                                                      by sorry
+                                                    qed
+                                                  qed
+                                                qed
+                                              next
+                                                case c_HTLChash
+                                                by sorry
+                                              qed
+                                            next
+                                              case Alice_2_case_2
+                                              by contradiction /* from formulas */
+                                            next
+                                              case Alice_2_case_3
+                                              by contradiction /* from formulas */
+                                            next
+                                              case Alice_receive_case_1
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_2
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_3
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_4
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_5
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_6
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_7
+                                              by sorry
+                                            next
+                                              case Alice_receive_case_8
+                                              by sorry
+                                            next
+                                              case Block_MineCoin_case_1
+                                              by sorry
+                                            next
+                                              case Block_MineCoin_case_2
+                                              by sorry
+                                            next
+                                              case Block_MineCoin_case_3
+                                              by sorry
+                                            next
+                                              case Bob_2_case_01
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_02
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_03
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_04
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_05
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_06
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_07
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_08
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_09
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_10
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_11
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_12
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_13
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_14
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_15
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_2_case_16
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_01
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_02
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_03
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_04
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_05
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_06
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_07
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_08
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_09
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_10
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_11
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_12
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_13
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_14
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_15
+                                              by contradiction /* cyclic */
+                                            next
+                                              case Bob_receive_case_16
+                                              by contradiction /* cyclic */
+                                            next
+                                              case address_register
+                                              by sorry
+                                            next
+                                              case c_pk
+                                              by contradiction /* from formulas */
+                                            next
+                                              case creatCointoCoin_case_1
+                                              by sorry
+                                            next
+                                              case creatCointoCoin_case_2
+                                              by sorry
+                                            next
+                                              case creatCointoCoin_case_3
+                                              by sorry
+                                            qed
+                                          next
+                                            case Alice_2_case_2
+                                            by contradiction /* from formulas */
+                                          next
+                                            case Alice_2_case_3
+                                            by contradiction /* from formulas */
+                                          next
+                                            case Alice_receive_case_1
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_2
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_3
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_4
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_5
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_6
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_7
+                                            by sorry
+                                          next
+                                            case Alice_receive_case_8
+                                            by sorry
+                                          next
+                                            case Block_MineCoin_case_1
+                                            by sorry
+                                          next
+                                            case Block_MineCoin_case_2
+                                            by sorry
+                                          next
+                                            case Block_MineCoin_case_3
+                                            by sorry
+                                          next
+                                            case Bob_2_case_01
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_02
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_03
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_04
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_05
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_06
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_07
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_08
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_09
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_10
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_11
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_12
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_13
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_14
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_15
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_2_case_16
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_01
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_02
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_03
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_04
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_05
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_06
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_07
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_08
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_09
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_10
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_11
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_12
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_13
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_14
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_15
+                                            by contradiction /* cyclic */
+                                          next
+                                            case Bob_receive_case_16
+                                            by contradiction /* cyclic */
+                                          next
+                                            case address_register
+                                            by sorry
+                                          next
+                                            case c_pk
+                                            by contradiction /* from formulas */
+                                          next
+                                            case creatCointoCoin_case_1
+                                            by sorry
+                                          next
+                                            case creatCointoCoin_case_2
+                                            by sorry
+                                          next
+                                            case creatCointoCoin_case_3
+                                            by sorry
+                                          qed
+                                        qed
+                                      qed
+                                    qed
+                                  next
+                                    case Block_MineCoin
+                                    by sorry
+                                  next
+                                    case creatCointoCoin
+                                    by sorry
+                                  qed
+                                qed
+                              qed
+                            qed
+                          next
+                            case Alice_2_case_5
+                            by sorry
+                          next
+                            case Alice_receive_case_1
+                            by sorry
+                          next
+                            case Alice_receive_case_2
+                            by sorry
+                          next
+                            case Alice_receive_case_3
+                            by sorry
+                          next
+                            case Alice_receive_case_4
+                            by sorry
+                          next
+                            case Alice_receive_case_5
+                            by sorry
+                          next
+                            case Alice_receive_case_6
+                            by sorry
+                          next
+                            case Alice_receive_case_7
+                            by sorry
+                          next
+                            case Alice_receive_case_8
+                            by sorry
+                          next
+                            case Block_MineCoin_case_1
+                            by sorry
+                          next
+                            case Block_MineCoin_case_2
+                            by sorry
+                          next
+                            case Block_MineCoin_case_3
+                            by sorry
+                          next
+                            case Bob_2_case_01
+                            by sorry
+                          next
+                            case Bob_2_case_02
+                            by sorry
+                          next
+                            case Bob_2_case_03
+                            by sorry
+                          next
+                            case Bob_2_case_04
+                            by sorry
+                          next
+                            case Bob_2_case_05
+                            by sorry
+                          next
+                            case Bob_2_case_06
+                            by sorry
+                          next
+                            case Bob_2_case_07
+                            by sorry
+                          next
+                            case Bob_2_case_08
+                            by sorry
+                          next
+                            case Bob_2_case_09
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_10
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_11
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_12
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_13
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_14
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_15
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_2_case_16
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_01
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_02
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_03
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_04
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_05
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_06
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_07
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_08
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_09
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_10
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_11
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_12
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_13
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_14
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_15
+                            by contradiction /* from formulas */
+                          next
+                            case Bob_receive_case_16
+                            by contradiction /* from formulas */
+                          next
+                            case address_register
+                            by sorry
+                          next
+                            case c_pk
+                            by contradiction /* from formulas */
+                          next
+                            case creatCointoCoin_case_1
+                            by sorry
+                          next
+                            case creatCointoCoin_case_2
+                            by sorry
+                          next
+                            case creatCointoCoin_case_3
+                            by sorry
+                          qed
+                        next
+                          case Alice_2_case_2
+                          by sorry
+                        next
+                          case c_sign
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_sign
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  next
+                    case Alice_2_case_2
+                    by contradiction /* from formulas */
+                  next
+                    case c_sign
+                    by sorry
+                  qed
+                next
+                  case Alice_2_case_2
+                  by sorry
+                next
+                  case Bob_receive_case_01
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_02
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_03
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_04
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_05
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_06
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_07
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_08
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_09
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_10
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_11
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_12
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_13
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_14
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_15
+                  by contradiction /* from formulas */
+                next
+                  case Bob_receive_case_16
+                  by contradiction /* from formulas */
+                next
+                  case c_TXhash
+                  by sorry
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    next
+      case Alice_1_case_2
+      by sorry
+    next
+      case Alice_1_case_3
+      by sorry
+    next
+      case Alice_1_case_4
+      by sorry
+    next
+      case MaliciousAlice_case_1
+      by sorry
+    next
+      case MaliciousAlice_case_2
+      by sorry
+    next
+      case MaliciousAlice_case_3
+      by sorry
+    next
+      case MaliciousAlice_case_4
+      by sorry
+    next
+      case MaliciousAlice_case_5
+      by sorry
+    next
+      case MaliciousAlice_case_6
+      by sorry
+    next
+      case MaliciousAlice_case_7
+      by sorry
+    next
+      case MaliciousAlice_case_8
+      by sorry
+    qed
+  qed
+qed
+
+/* All well-formedness checks were successful. */
+
+end

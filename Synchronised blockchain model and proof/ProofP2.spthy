@@ -1,0 +1,3162 @@
+theory TikLegerHTLC begin
+
+// Function signature and definition of the equational theory E
+
+builtins: multiset
+functions: HTLChash/1, TXhash/1, fst/1, h/1, pair/2, pk/1, sign/2,
+           snd/1, true/0, verify/3
+equations:
+    fst(<x.1, x.2>) = x.1,
+    snd(<x.1, x.2>) = x.2,
+    verify(sign(x.1, x.2), x.1, pk(x.2)) = true
+
+
+
+rule (modulo E) address_register:
+   [ Fr( ~ltkA ) ]
+  --[ !PK( $A, pk(~ltkA) ) ]->
+   [ !Ltk( $A, ~ltkA ), !PK( $A, pk(~ltkA) ), Out( pk(~ltkA) ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Tick_start:
+   [ Chain( BC ) ]
+  --[ TickStart( BC, '1' ), Tick( BC, '1' ), LedgerTick( BC, '1' )
+  ]->
+   [ Tick( BC, '1' ), LedgerTick( BC, '1' ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Tick:
+   [ Tick( BC, height )[+] ]
+  --[ Tick( BC, ('1'+height) ), LedgerTick( BC, ('1'+height) ) ]->
+   [ Tick( BC, ('1'+height) )[+], LedgerTick( BC, ('1'+height) )[+] ]
+
+  // loop breaker: [0]
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Blockchain:
+   [ ] --[ BChain( '1' ) ]-> [ Chain( 'BC1' ), Chain( 'BC2' ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) MineCoin:
+   [ Fr( ~n ), !PK( A, pkA ), LedgerTick( BC, t )[+] ]
+  --[ MineCoin( BC, ~n, t ) ]->
+   [ !SimpleTx( BC, '0', '0', pkA, ~n, t ), Out( <'0', '0', pkA, ~n> )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Simple_Tx:
+   [
+   !SimpleTx( BC, txPrevious, SigPre, pkA, tx, LedgerTick ),
+   LedgerTick( BC, t )[+], In( <SigA, pkB> )
+   ]
+  --[
+  HappenBefore( BC, LedgerTick, t ),
+  Eq( verify(SigA, <BC, tx, pkA, pkB>, pkA), true ),
+  !SimpleTx( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+  Spend( BC, tx, 'Simple', t )
+  ]->
+   [
+   !SimpleTx( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+   Out( <tx, SigA, pkB, TXhash(<tx, SigA, pkB>)> )
+   ]
+
+  // loop breaker: [0]
+  /*
+  rule (modulo AC) Simple_Tx:
+     [
+     !SimpleTx( BC, txPrevious, SigPre, pkA, tx, LedgerTick ),
+     LedgerTick( BC, t )[+], In( <SigA, pkB> )
+     ]
+    --[
+    HappenBefore( BC, LedgerTick, t ), Eq( z, true ),
+    !SimpleTx( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+    Spend( BC, tx, 'Simple', t )
+    ]->
+     [
+     !SimpleTx( BC, tx, SigA, pkB, TXhash(<tx, SigA, pkB>), t ),
+     Out( <tx, SigA, pkB, TXhash(<tx, SigA, pkB>)> )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.12
+       SigA  = SigA.14
+       pkA   = pkA.16
+       pkB   = pkB.17
+       tx    = tx.19
+       z     = verify(SigA.14, <BC.12, tx.19, pkA.16, pkB.17>, pkA.16)
+    
+    2. BC    = BC.16
+       SigA  = sign(<BC.16, tx.23, pk(x.29), pkB.21>, x.29)
+       pkA   = pk(x.29)
+       pkB   = pkB.21
+       tx    = tx.23
+       z     = true
+    // loop breaker: [0]
+  */
+
+rule (modulo E) Commit_Tx:
+   [
+   !SimpleTx( BC, txPrevious, SigPre, pkA_0, tx, LedgerTick ),
+   In( <SigA_0, pkA, timelock, hash, pkB> ), LedgerTick( BC, t )
+   ]
+  --[
+  HappenBefore( BC, LedgerTick, t ),
+  Eq( verify(SigA_0, <BC, tx, pkA_0, pkA, timelock, hash, pkB>,
+             pkA_0),
+      true
+  ),
+  !CommitTx( BC, tx, SigA_0, <pkA, timelock, hash, pkB>,
+             TXhash(<tx, SigA_0, pkA, timelock, hash, pkB>), t
+  ),
+  Spend( BC, tx, 'Simple', t )
+  ]->
+   [
+   !CommitTx( BC, tx, SigA_0, <pkA, timelock, hash, pkB>,
+              TXhash(<tx, SigA_0, pkA, timelock, hash, pkB>), t
+   ),
+   Out( <BC, tx, SigA_0, <pkA, timelock, hash, pkB>, 
+         TXhash(<tx, SigA_0, pkA, timelock, hash, pkB>)>
+   )
+   ]
+
+  /*
+  rule (modulo AC) Commit_Tx:
+     [
+     !SimpleTx( BC, txPrevious, SigPre, pkA_0, tx, LedgerTick ),
+     In( <SigA_0, pkA, timelock, hash, pkB> ), LedgerTick( BC, t )
+     ]
+    --[
+    HappenBefore( BC, LedgerTick, t ), Eq( z, true ),
+    !CommitTx( BC, tx, SigA_0, <pkA, timelock, hash, pkB>,
+               TXhash(<tx, SigA_0, pkA, timelock, hash, pkB>), t
+    ),
+    Spend( BC, tx, 'Simple', t )
+    ]->
+     [
+     !CommitTx( BC, tx, SigA_0, <pkA, timelock, hash, pkB>,
+                TXhash(<tx, SigA_0, pkA, timelock, hash, pkB>), t
+     ),
+     Out( <BC, tx, SigA_0, <pkA, timelock, hash, pkB>, 
+           TXhash(<tx, SigA_0, pkA, timelock, hash, pkB>)>
+     )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.15
+       SigA_0
+             = SigA_0.17
+       hash  = hash.19
+       pkA   = pkA.20
+       pkA_0 = pkA_0.21
+       pkB   = pkB.22
+       timelock
+             = timelock.24
+       tx    = tx.25
+       z     = verify(SigA_0.17,
+                      <BC.15, tx.25, pkA_0.21, pkA.20, timelock.24, hash.19, pkB.22>,
+                      pkA_0.21)
+    
+    2. BC    = BC.22
+       SigA_0
+             = sign(<BC.22, tx.32, pk(x.38), pkA.27, timelock.31, hash.26, 
+                     pkB.29>,
+                    x.38)
+       hash  = hash.26
+       pkA   = pkA.27
+       pkA_0 = pk(x.38)
+       pkB   = pkB.29
+       timelock
+             = timelock.31
+       tx    = tx.32
+       z     = true
+  */
+
+rule (modulo E) Commit_TimeOut:
+   [
+   !CommitTx( BC, tx0, SigA_0, <pkA1, timelock, hash, pkB3>, tx,
+              LedgerTick
+   )[+],
+   In( <Script1, PKaddress> ), LedgerTick( BC, t )[+]
+   ]
+  --[
+  HappenBefore( BC, (LedgerTick+timelock), t ),
+  Eq( verify(Script1,
+             <BC, tx, <pkA1, timelock, hash, pkB3>, PKaddress>, pkA1),
+      true
+  ),
+  Spend( BC, tx, 'CommitTout', t ),
+  !SimpleTx( BC, tx, Script1, PKaddress,
+             TXhash(<tx, Script1, PKaddress>), t
+  )
+  ]->
+   [
+   !SimpleTx( BC, tx, Script1, PKaddress,
+              TXhash(<tx, Script1, PKaddress>), t
+   ),
+   Out( <BC, tx, Script1, PKaddress, TXhash(<tx, Script1, PKaddress>)>
+   )
+   ]
+
+  // loop breaker: [0]
+  /*
+  rule (modulo AC) Commit_TimeOut:
+     [
+     !CommitTx( BC, tx0, SigA_0, <pkA1, timelock, hash, pkB3>, tx,
+                LedgerTick
+     )[+],
+     In( <Script1, PKaddress> ), LedgerTick( BC, t )[+]
+     ]
+    --[
+    HappenBefore( BC, (LedgerTick+timelock), t ), Eq( z, true ),
+    Spend( BC, tx, 'CommitTout', t ),
+    !SimpleTx( BC, tx, Script1, PKaddress,
+               TXhash(<tx, Script1, PKaddress>), t
+    )
+    ]->
+     [
+     !SimpleTx( BC, tx, Script1, PKaddress,
+                TXhash(<tx, Script1, PKaddress>), t
+     ),
+     Out( <BC, tx, Script1, PKaddress, TXhash(<tx, Script1, PKaddress>)>
+     )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.15
+       PKaddress
+             = PKaddress.17
+       Script1
+             = Script1.18
+       hash  = hash.20
+       pkA1  = pkA1.21
+       pkB3  = pkB3.22
+       timelock
+             = timelock.24
+       tx    = tx.25
+       z     = verify(Script1.18,
+                      <BC.15, tx.25, <pkA1.21, timelock.24, hash.20, pkB3.22>, 
+                       PKaddress.17>,
+                      pkA1.21)
+    
+    2. BC    = BC.22
+       PKaddress
+             = PKaddress.24
+       Script1
+             = sign(<BC.22, tx.32, <pk(x.39), timelock.31, hash.27, pkB3.29>, 
+                     PKaddress.24>,
+                    x.39)
+       hash  = hash.27
+       pkA1  = pk(x.39)
+       pkB3  = pkB3.29
+       timelock
+             = timelock.31
+       tx    = tx.32
+       z     = true
+    // loop breaker: [0]
+  */
+
+rule (modulo E) Commit_Open:
+   [
+   !CommitTx( BC, tx0, SigA_0, <pkA1, timelock, hash, pkB3>, tx,
+              LedgerTick
+   )[+],
+   In( <<Script1, Script2>, PKaddress> ), LedgerTick( BC, t )[+]
+   ]
+  --[
+  HappenBefore( BC, LedgerTick, t ), Eq( HTLChash(Script1), hash ),
+  Eq( verify(Script2,
+             <BC, tx, <pkA1, timelock, hash, pkB3>, PKaddress>, pkB3),
+      true
+  ),
+  !SimpleTx( BC, tx, <Script1, Script2>, PKaddress,
+             TXhash(<tx, <Script1, Script2>, PKaddress>), t
+  ),
+  Spend( BC, tx, 'CommitOpen', t )
+  ]->
+   [
+   !SimpleTx( BC, tx, <Script1, Script2>, PKaddress,
+              TXhash(<tx, <Script1, Script2>, PKaddress>), t
+   ),
+   Out( <BC, tx, <Script1, Script2>, PKaddress, 
+         TXhash(<tx, <Script1, Script2>, PKaddress>)>
+   )
+   ]
+
+  // loop breaker: [0]
+  /*
+  rule (modulo AC) Commit_Open:
+     [
+     !CommitTx( BC, tx0, SigA_0, <pkA1, timelock, hash, pkB3>, tx,
+                LedgerTick
+     )[+],
+     In( <<Script1, Script2>, PKaddress> ), LedgerTick( BC, t )[+]
+     ]
+    --[
+    HappenBefore( BC, LedgerTick, t ), Eq( HTLChash(Script1), hash ),
+    Eq( z, true ),
+    !SimpleTx( BC, tx, <Script1, Script2>, PKaddress,
+               TXhash(<tx, <Script1, Script2>, PKaddress>), t
+    ),
+    Spend( BC, tx, 'CommitOpen', t )
+    ]->
+     [
+     !SimpleTx( BC, tx, <Script1, Script2>, PKaddress,
+                TXhash(<tx, <Script1, Script2>, PKaddress>), t
+     ),
+     Out( <BC, tx, <Script1, Script2>, PKaddress, 
+           TXhash(<tx, <Script1, Script2>, PKaddress>)>
+     )
+     ]
+    variants (modulo AC)
+    1. BC    = BC.16
+       PKaddress
+             = PKaddress.18
+       Script2
+             = Script2.20
+       hash  = hash.22
+       pkA1  = pkA1.23
+       pkB3  = pkB3.24
+       timelock
+             = timelock.26
+       tx    = tx.27
+       z     = verify(Script2.20,
+                      <BC.16, tx.27, <pkA1.23, timelock.26, hash.22, pkB3.24>, 
+                       PKaddress.18>,
+                      pkB3.24)
+    
+    2. BC    = BC.24
+       PKaddress
+             = PKaddress.26
+       Script2
+             = sign(<BC.24, tx.35, <pkA1.31, timelock.34, hash.30, pk(x.46)>, 
+                     PKaddress.26>,
+                    x.46)
+       hash  = hash.30
+       pkA1  = pkA1.31
+       pkB3  = pk(x.46)
+       timelock
+             = timelock.34
+       tx    = tx.35
+       z     = true
+    // loop breaker: [0]
+  */
+
+rule (modulo E) creatCointoCoin:
+   [
+   !SimpleTx( BC, txPrevious, SigA, pk(ltkB), tx, t ),
+   !PK( B, pk(ltkB) ), !PK( C, pkC ), Fr( ~txNew )
+   ]
+  --[ SpendCoin( BC, tx ) ]->
+   [
+   Out( <tx, sign(<BC, tx, pk(ltkB), pkC>, ltkB), pk(ltkB), ~txNew> )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+restriction DoubleSpending:
+  "∀ BC x n m t1 t2 #i #j.
+    ((Spend( BC, x, n, t1 ) @ #i) ∧ (Spend( BC, x, m, t2 ) @ #j)) ⇒
+    (#i = #j)"
+  // safety formula
+
+restriction HappenBefore:
+  "∀ BC t1 t2 #i.
+    (HappenBefore( BC, t1, t2 ) @ #i) ⇒ (∃ x. t2 = (t1+x))"
+
+restriction Equality:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+restriction inequality:
+  "∀ x #i. (InEq( x, x ) @ #i) ⇒ (⊥)"
+  // safety formula
+
+restriction No_keyReveal:
+  "∀ #i A ltkA.
+    (!PK( A, pk(ltkA) ) @ #i) ⇒ (¬(∃ #j. !KU( ltkA ) @ #j))"
+  // safety formula
+
+restriction ledgerHeight:
+  "¬(∃ BC height #i. Tick( BC, ('1'+'1'+'1'+'1'+'1'+height) ) @ #i)"
+  // safety formula
+
+restriction twoLedger:
+  "∀ #i #j.
+    ((BChain( '1' ) @ #i) ∧ (BChain( '1' ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+lemma Smart_adversary_simpleTx [sources]:
+  all-traces
+  "∀ BC tx SigA pkB txNew t #i.
+    (!SimpleTx( BC, tx, SigA, pkB, txNew, t ) @ #i) ⇒
+    ((∃ #j1 #j2 #j3.
+       (((((!KU( tx ) @ #j1) ∧ (!KU( SigA ) @ #j2)) ∧
+          (!KU( pkB ) @ #j3)) ∧
+         (#j1 < #i)) ∧
+        (#j2 < #i)) ∧
+       (#j3 < #i)) ∨
+     (∃ #j. (MineCoin( BC, tx, t ) @ #j) ∧ (#j < #i)))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC tx SigA pkB txNew t #i.
+  (!SimpleTx( BC, tx, SigA, pkB, txNew, t ) @ #i)
+ ∧
+  (∀ #j1 #j2 #j3.
+    (!KU( tx ) @ #j1) ∧ (!KU( SigA ) @ #j2) ∧ (!KU( pkB ) @ #j3)
+   ⇒
+    ((¬(#j1 < #i)) ∨ (¬(#j2 < #i)) ∨ (¬(#j3 < #i)))) ∧
+  (∀ #j. (MineCoin( BC, tx, t ) @ #j) ⇒ ¬(#j < #i))"
+*/
+by sorry
+
+lemma Smart_adversary_CommitCoin [sources]:
+  all-traces
+  "∀ BC tx SigA pkA timelock hash pkB txNew t #i.
+    (!CommitTx( BC, tx, SigA, <pkA, timelock, hash, pkB>, txNew, t
+     ) @ #i) ⇒
+    (∃ #j1 #j2 #j3 #j4 #j5 #j6 #j7.
+      (((((((((((((!KU( tx ) @ #j1) ∧ (!KU( SigA ) @ #j2)) ∧
+                 (!KU( pkA ) @ #j3)) ∧
+                (!KU( timelock ) @ #j4)) ∧
+               (!KU( hash ) @ #j5)) ∧
+              (!KU( pkB ) @ #j6)) ∧
+             (!KU( BC ) @ #j7)) ∧
+            (#j1 < #i)) ∧
+           (#j2 < #i)) ∧
+          (#j3 < #i)) ∧
+         (#j4 < #i)) ∧
+        (#j5 < #i)) ∧
+       (#j6 < #i)) ∧
+      (#j7 < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC tx SigA pkA timelock hash pkB txNew t #i.
+  (!CommitTx( BC, tx, SigA, <pkA, timelock, hash, pkB>, txNew, t
+   ) @ #i)
+ ∧
+  ∀ #j1 #j2 #j3 #j4 #j5 #j6 #j7.
+   (!KU( tx ) @ #j1) ∧
+   (!KU( SigA ) @ #j2) ∧
+   (!KU( pkA ) @ #j3) ∧
+   (!KU( timelock ) @ #j4) ∧
+   (!KU( hash ) @ #j5) ∧
+   (!KU( pkB ) @ #j6) ∧
+   (!KU( BC ) @ #j7)
+  ⇒
+   ((¬(#j1 < #i)) ∨
+    (¬(#j2 < #i)) ∨
+    (¬(#j3 < #i)) ∨
+    (¬(#j4 < #i)) ∨
+    (¬(#j5 < #i)) ∨
+    (¬(#j6 < #i)) ∨
+    (¬(#j7 < #i)))"
+*/
+by sorry
+
+lemma originalCoin [sources]:
+  all-traces
+  "∀ BC tx sig pkA txNew t #j.
+    (!SimpleTx( BC, tx, sig, pkA, txNew, t ) @ #j) ⇒
+    (∃ n #i. (MineCoin( BC, n, '1' ) @ #i) ∧ (#i < #j))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC tx sig pkA txNew t #j.
+  (!SimpleTx( BC, tx, sig, pkA, txNew, t ) @ #j)
+ ∧
+  ∀ n #i. (MineCoin( BC, n, '1' ) @ #i) ⇒ ¬(#i < #j)"
+*/
+by sorry
+
+lemma commitLedgerTick [sources]:
+  all-traces
+  "¬(∃ BC tx Sig script txNew #i.
+      !CommitTx( BC, tx, Sig, script, txNew, '1' ) @ #i)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC tx Sig script txNew #i.
+  (!CommitTx( BC, tx, Sig, script, txNew, '1' ) @ #i)"
+*/
+by sorry
+
+lemma commitOpenTick [sources]:
+  all-traces
+  "∀ BC tx LedgerTick #i.
+    (Spend( BC, tx, 'CommitOpen', LedgerTick ) @ #i) ⇒
+    ((¬(LedgerTick = '1')) ∧ (¬(LedgerTick = ('1'+'1'))))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC tx LedgerTick #i.
+  (Spend( BC, tx, 'CommitOpen', LedgerTick ) @ #i)
+ ∧
+  ((LedgerTick = '1') ∨ (LedgerTick = ('1'+'1')))"
+*/
+by sorry
+
+lemma commitToutTick [sources]:
+  all-traces
+  "∀ BC tx LedgerTick #i.
+    (Spend( BC, tx, 'CommitTout', LedgerTick ) @ #i) ⇒
+    ((¬(LedgerTick = '1')) ∧ (¬(LedgerTick = ('1'+'1'))))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC tx LedgerTick #i.
+  (Spend( BC, tx, 'CommitTout', LedgerTick ) @ #i)
+ ∧
+  ((LedgerTick = '1') ∨ (LedgerTick = ('1'+'1')))"
+*/
+by sorry
+
+lemma uniqueTick [sources]:
+  all-traces
+  "∀ BC height #i #j.
+    ((Tick( BC, height ) @ #i) ∧ (Tick( BC, height ) @ #j)) ⇒
+    (#i = #j)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ BC height #i #j.
+  (Tick( BC, height ) @ #i) ∧ (Tick( BC, height ) @ #j) ∧ ¬(#i = #j)"
+*/
+by sorry
+
+rule (modulo E) Alice_send:
+   [
+   !SimpleTx( 'BC1', '0', '0', pk(ltkA), tx, '1' ),
+   !PK( A, pk(ltkA1) ), !PK( A, pkA2 ), !PK( B, pkB3 ), Fr( ~hsk )
+   ]
+  --[ InEq( A, B ), Alice_1( HTLChash(~hsk) ) ]->
+   [
+   Out( <tx, 
+         sign(<'BC1', tx, pk(ltkA), pk(ltkA1), ('1'+'1'), HTLChash(~hsk), 
+               pkB3>,
+              ltkA), 
+         pk(ltkA1), ('1'+'1'), HTLChash(~hsk), pkB3>
+   ),
+   Out( <
+         TXhash(<tx, 
+                 sign(<'BC1', tx, pk(ltkA), pk(ltkA1), ('1'+'1'), HTLChash(~hsk), 
+                       pkB3>,
+                      ltkA), 
+                 pk(ltkA1), ('1'+'1'), HTLChash(~hsk), pkB3>), 
+         sign(<'BC1', 
+               TXhash(<tx, 
+                       sign(<'BC1', tx, pk(ltkA), pk(ltkA1), ('1'+'1'), HTLChash(~hsk), 
+                             pkB3>,
+                            ltkA), 
+                       pk(ltkA1), ('1'+'1'), HTLChash(~hsk), pkB3>), 
+               <pk(ltkA1), ('1'+'1'), HTLChash(~hsk), pkB3>, pkA2>,
+              ltkA1), 
+         pkA2>
+   ),
+   Alice_1_record( HTLChash(~hsk), ~hsk )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Alice_receive:
+   [
+   !CommitTx( 'BC2', tx0, SigB0, <pkB1, timelock_B, hash, pk(ltkA3)>,
+              CommitTxBob, ('1'+'1')
+   )[+],
+   Alice_1_record( hash, hsk ), !PK( A, pkA4 )
+   ]
+  --[ Alice_receive( CommitTxBob ) ]->
+   [
+   Reveal( hsk ),
+   Out( <CommitTxBob, 
+         <hsk, 
+          sign(<'BC2', CommitTxBob, <pkB1, timelock_B, hash, pk(ltkA3)>, pkA4
+               >,
+               ltkA3)
+         >, 
+         pkA4>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Bob_send:
+   [
+   !SimpleTx( 'BC2', '0', '0', pk(ltkB), tx, '1' ),
+   !CommitTx( 'BC1', tx_0, SigA_0, <pkA, timelock_A, hash, pkB>,
+              CommitTxAlice, ('1'+'1')
+   ),
+   !PK( B, pk(ltkB1) ), !PK( B, pkB2 ), !PK( A, pkA3 ), !PK( A, pkA )
+   ]
+  --[ Bob_1( '1' ), Not_Spend( CommitTxAlice ) ]->
+   [
+   Bob_1_record( hash, CommitTxAlice ),
+   Out( <tx, 
+         sign(<'BC2', tx, pk(ltkB), pk(ltkB1), '1', hash, pkA3>, ltkB), 
+         pk(ltkB1), '1', hash, pkA3>
+   ),
+   Out( <
+         TXhash(<tx, 
+                 sign(<'BC2', tx, pk(ltkB), pk(ltkB1), '1', hash, pkA3>, ltkB), 
+                 pk(ltkB1), '1', hash, pkA3>), 
+         sign(<'BC2', 
+               TXhash(<tx, 
+                       sign(<'BC2', tx, pk(ltkB), pk(ltkB1), '1', hash, pkA3>, ltkB), 
+                       pk(ltkB1), '1', hash, pkA3>), 
+               <pk(ltkB1), '1', hash, pkA3>, pkB2>,
+              ltkB1), 
+         pkB2>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+restriction Not_Spend:
+  "∀ tx #i.
+    (Not_Spend( tx ) @ #i) ⇒
+    (¬(∃ #j t. (Spend( 'BC1', tx, 'Simple', t ) @ #j) ∧ (#j < #i)))"
+  // safety formula
+
+rule (modulo E) Bob_receive:
+   [
+   Bob_1_record( hash, CommitTxAlice ), Reveal( hsk ),
+   !CommitTx( 'BC1', tx0, SigA0, <pkA1, timelock_A, hash, pk(ltkB3)>,
+              CommitTxAlice, ('1'+'1')
+   ),
+   !PK( B, pkB4 )
+   ]
+  --[ Bob_receive( CommitTxAlice ) ]->
+   [
+   Out( <CommitTxAlice, 
+         <hsk, 
+          sign(<'BC1', CommitTxAlice, <pkA1, timelock_A, hash, pk(ltkB3)>, 
+                pkB4>,
+               ltkB3)
+         >, 
+         pkB4>
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+lemma CommitTout_blockchain1_executable:
+  exists-trace "∃ x t #i. Spend( 'BC1', x, 'CommitTout', t ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ x t #i. (Spend( 'BC1', x, 'CommitTout', t ) @ #i)"
+*/
+by sorry
+
+lemma CommitTout_blockchain2_executable:
+  exists-trace "∃ x t #i. Spend( 'BC2', x, 'CommitTout', t ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ x t #i. (Spend( 'BC2', x, 'CommitTout', t ) @ #i)"
+*/
+by sorry
+
+lemma CommitOpen_blockchain1_executable:
+  exists-trace "∃ x t #i. Spend( 'BC1', x, 'CommitOpen', t ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ x t #i. (Spend( 'BC1', x, 'CommitOpen', t ) @ #i)"
+*/
+by sorry
+
+lemma CommitOpen_blockchain2_executable:
+  exists-trace "∃ x t #i. Spend( 'BC2', x, 'CommitOpen', t ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ x t #i. (Spend( 'BC2', x, 'CommitOpen', t ) @ #i)"
+*/
+by sorry
+
+lemma Alice11:
+  exists-trace "∃ #i. Alice_1( '1' ) @ #i"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ #i. (Alice_1( '1' ) @ #i)"
+*/
+by sorry
+
+lemma Alice_3:
+  exists-trace
+  "∃ tx #i #j t.
+    (Alice_receive( tx ) @ #i) ∧
+    (Spend( 'BC2', tx, 'CommitOpen', t ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ tx #i #j t.
+  (Alice_receive( tx ) @ #i) ∧
+  (Spend( 'BC2', tx, 'CommitOpen', t ) @ #j)"
+*/
+by sorry
+
+lemma Bob_receive:
+  exists-trace
+  "∃ tx #i #j t.
+    (Bob_receive( tx ) @ #i) ∧
+    (Spend( 'BC1', tx, 'CommitOpen', t ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ tx #i #j t.
+  (Bob_receive( tx ) @ #i) ∧
+  (Spend( 'BC1', tx, 'CommitOpen', t ) @ #j)"
+*/
+by sorry                        
+
+lemma Security_2_Alice:
+  all-traces
+  "∀ tx2 SigB pkB1 timelock_B hash pkA3 CommitTxBob TickBcom #tBcom
+     TickBTout #tBTout.
+    ((!CommitTx( 'BC2', tx2, SigB, <pkB1, timelock_B, hash, pkA3>,
+                 CommitTxBob, TickBcom
+      ) @ #tBcom) ∧
+     (Spend( 'BC2', CommitTxBob, 'CommitTout', TickBTout ) @ #tBTout)) ⇒
+    (∃ x. TickBTout = (TickBcom+timelock_B+x))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ tx2 SigB pkB1 timelock_B hash pkA3 CommitTxBob TickBcom #tBcom
+   TickBTout #tBTout.
+  (!CommitTx( 'BC2', tx2, SigB, <pkB1, timelock_B, hash, pkA3>,
+              CommitTxBob, TickBcom
+   ) @ #tBcom) ∧
+  (Spend( 'BC2', CommitTxBob, 'CommitTout', TickBTout ) @ #tBTout)
+ ∧
+  ∀ x. (TickBTout = (TickBcom+timelock_B+x)) ⇒ ⊥"
+*/
+simplify
+solve( !KU( sign(<'BC2', tx2, pk(x), pkB1, timelock_B, hash, pkA3>,
+                 x)
+       ) @ #vk.1 )
+  case Bob_send
+  solve( !KU( sign(<'BC1', ~n.1, pk(~ltkA.3), pk(~ltkA.4), 
+                    timelock_A, hash, pkB>,
+                   ~ltkA.3)
+         ) @ #vk.11 )
+    case Alice_send
+    solve( Spend( 'BC2',
+                  TXhash(<~n, 
+                          sign(<'BC2', ~n, pk(~ltkA), pk(~ltkA.1), '1', HTLChash(~hsk), 
+                                pk(~ltkA.2)>,
+                               ~ltkA), 
+                          pk(~ltkA.1), '1', HTLChash(~hsk), pk(~ltkA.2)>),
+                  'CommitTout', TickBTout
+           ) @ #tBTout )
+      case Commit_TimeOut
+      solve( !KU( sign(<'BC2', 
+                        TXhash(<~n, 
+                                sign(<'BC2', ~n, pk(~ltkA), pk(~ltkA.1), '1', HTLChash(~hsk), 
+                                      pk(~ltkA.2)>,
+                                     ~ltkA), 
+                                pk(~ltkA.1), '1', HTLChash(~hsk), pk(~ltkA.2)>), 
+                        <pk(x), timelock, hash, pkB3>, PKaddress>,
+                       x)
+             ) @ #vk.18 )
+        case Alice_receive
+        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                          <pk(~ltkA), '1', HTLChash(~hsk), pk(~ltkA)>,
+                          TXhash(<~n, 
+                                  sign(<'BC2', ~n, pk(~ltkA.1), pk(~ltkA), '1', HTLChash(~hsk), 
+                                        pk(~ltkA)>,
+                                       ~ltkA.1), 
+                                  pk(~ltkA), '1', HTLChash(~hsk), pk(~ltkA)>),
+                          LedgerTick
+               )[+] ▶₀ #tBTout )
+          case Commit_Tx
+          by contradiction /* from formulas */
+        qed
+      next
+        case Bob_send
+        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                          <pk(~ltkA), '1', HTLChash(~hsk), pk(~ltkA.1)>,
+                          TXhash(<~n, 
+                                  sign(<'BC2', ~n, pk(~ltkA.2), pk(~ltkA), '1', HTLChash(~hsk), 
+                                        pk(~ltkA.1)>,
+                                       ~ltkA.2), 
+                                  pk(~ltkA), '1', HTLChash(~hsk), pk(~ltkA.1)>),
+                          LedgerTick
+               )[+] ▶₀ #tBTout )
+          case Commit_Tx
+          by contradiction /* from formulas */
+        qed
+      next
+        case c_sign
+        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                          <pk(x), timelock, hash, pkB3>,
+                          TXhash(<~n, 
+                                  sign(<'BC2', ~n, pk(~ltkA), pk(~ltkA.1), '1', HTLChash(~hsk), 
+                                        pk(~ltkA.2)>,
+                                       ~ltkA), 
+                                  pk(~ltkA.1), '1', HTLChash(~hsk), pk(~ltkA.2)>),
+                          LedgerTick
+               )[+] ▶₀ #tBTout )
+          case Commit_Tx
+          by contradiction /* from formulas */
+        qed
+      qed
+    qed
+  next
+    case c_sign
+    by contradiction /* from formulas */
+  qed
+next
+  case c_sign
+  solve( Spend( 'BC2',
+                TXhash(<tx2, 
+                        sign(<'BC2', tx2, pk(x), pkB1, timelock_B, hash, pkA3>, x), pkB1, 
+                        timelock_B, hash, pkA3>),
+                'CommitTout', TickBTout
+         ) @ #tBTout )
+    case Commit_TimeOut
+    solve( !KU( sign(<'BC2', 
+                      TXhash(<tx2, 
+                              sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>, x.1), 
+                              pkB1, timelock_B, hash.1, pkA3>), 
+                      <pk(x), timelock, hash, pkB3>, PKaddress>,
+                     x)
+           ) @ #vk.17 )
+      case Alice_receive
+      by contradiction /* from formulas */
+    next
+      case Bob_send
+      by contradiction /* from formulas */
+    next
+      case c_sign
+      solve( LedgerTick( 'BC2', (LedgerTick.1+x.3) ) ▶₂ #tBcom )
+        case Tick_case_1
+        solve( LedgerTick( 'BC2', (LedgerTick+timelock+x.2)
+               )[+] ▶₂ #tBTout )
+          case Tick_case_1
+          by solve( !CommitTx( 'BC2', tx0, SigA_0,
+                               <pk(x), timelock, hash, pkB3>,
+                               TXhash(<tx2, 
+                                       sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                            x.1), 
+                                       pkB1, timelock_B, hash.1, pkA3>),
+                               '1'
+                    )[+] ▶₀ #tBTout )
+        next
+          case Tick_case_2
+          solve( !CommitTx( 'BC2', tx0, SigA_0, <pk(x), '1', hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.1), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx
+            by contradiction /* from formulas */
+          qed
+        next
+          case Tick_case_3
+          solve( !KU( TXhash(<tx2, 
+                              sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>, x.1), 
+                              pkB1, timelock_B, hash.1, pkA3>)
+                 ) @ #vk.23 )
+            case Alice_receive
+            by contradiction /* from formulas */
+          next
+            case Bob_send
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx
+            by contradiction /* from formulas */
+          next
+            case c_TXhash
+            solve( !CommitTx( 'BC2', tx0, SigA_0,
+                              <pk(x), timelock, hash, pkB3>,
+                              TXhash(<tx2, 
+                                      sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                           x.1), 
+                                      pkB1, timelock_B, hash.1, pkA3>),
+                              LedgerTick
+                   )[+] ▶₀ #tBTout )
+              case Commit_Tx
+              by contradiction /* from formulas */
+            qed
+          qed
+        next
+          case Tick_case_4
+          solve( !KU( TXhash(<tx2, 
+                              sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>, x.1), 
+                              pkB1, timelock_B, hash.1, pkA3>)
+                 ) @ #vk.23 )
+            case Alice_receive
+            by contradiction /* from formulas */
+          next
+            case Bob_send
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx
+            by contradiction /* from formulas */
+          next
+            case c_TXhash
+            solve( !CommitTx( 'BC2', tx0, SigA_0,
+                              <pk(x), timelock, hash, pkB3>,
+                              TXhash(<tx2, 
+                                      sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                           x.1), 
+                                      pkB1, timelock_B, hash.1, pkA3>),
+                              LedgerTick
+                   )[+] ▶₀ #tBTout )
+              case Commit_Tx
+              by contradiction /* from formulas */
+            qed
+          qed
+        next
+          case Tick_case_5
+          solve( !CommitTx( 'BC2', tx0, SigA_0,
+                            <pk(x), ('1'+x.1), hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.2), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx
+            by contradiction /* from formulas */
+          qed
+        next
+          case Tick_case_6
+          solve( !KU( TXhash(<tx2, 
+                              sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>, x.1), 
+                              pkB1, timelock_B, hash.1, pkA3>)
+                 ) @ #vk.23 )
+            case Alice_receive
+            by contradiction /* from formulas */
+          next
+            case Bob_send
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx
+            by contradiction /* from formulas */
+          next
+            case c_TXhash
+            solve( !CommitTx( 'BC2', tx0, SigA_0,
+                              <pk(x), timelock, hash, pkB3>,
+                              TXhash(<tx2, 
+                                      sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                           x.1), 
+                                      pkB1, timelock_B, hash.1, pkA3>),
+                              ('1'+x.2)
+                   )[+] ▶₀ #tBTout )
+              case Commit_Tx
+              by contradiction /* from formulas */
+            qed
+          qed
+        qed
+      next
+        case Tick_case_2
+        solve( Tick( 'BC2', LedgerTick.1 )[+] ▶₀ #vr )
+          case Tick
+          solve( Tick( 'BC2', height )[+] ▶₀ #vr.1 )
+            case Tick
+            solve( Tick( 'BC2', height )[+] ▶₀ #vr.2 )
+              case Tick
+              solve( Tick( 'BC2', height )[+] ▶₀ #vr.3 )
+                case Tick
+                by contradiction /* from formulas */
+              next
+                case Tick_start
+                solve( !SimpleTx( 'BC2', txPrevious, SigPre, pk(x.1), tx2,
+                                  ('1'+'1'+'1'+'1')
+                       ) ▶₀ #tBcom )
+                  case Commit_Open_case_1
+                  by solve( !CommitTx( 'BC2', tx0.1, SigA_0.1,
+                                       <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, txPrevious,
+                                       '1'
+                            )[+] ▶₀ #vr.6 )
+                next
+                  case Commit_Open_case_2
+                  solve( !CommitTx( 'BC2', tx0.1, SigA_0.1,
+                                    <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, txPrevious,
+                                    ('1'+'1')
+                         )[+] ▶₀ #vr.6 )
+                    case Commit_Tx
+                    solve( !KU( sign(<'BC2', 
+                                      TXhash(<~n, 
+                                              sign(<'BC2', ~n, pk(~ltkA), pkA1, timelock.1, 
+                                                    HTLChash(Script1), pk(x.1)>,
+                                                   ~ltkA), 
+                                              pkA1, timelock.1, HTLChash(Script1), pk(x.1)>), 
+                                      <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, pk(x.2)>,
+                                     x.1)
+                           ) @ #vk.34 )
+                      case Alice_receive
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_send
+                      by contradiction /* from formulas */
+                    next
+                      case c_sign
+                      solve( !KU( sign(<'BC2', ~n, pk(~ltkA), pkA1, timelock.1, 
+                                        HTLChash(Script1), pk(x.1)>,
+                                       ~ltkA)
+                             ) @ #vk.38 )
+                        case Bob_send
+                        by contradiction /* from formulas */
+                      next
+                        case c_sign
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  qed
+                next
+                  case Commit_Open_case_3
+                  solve( !KU( sign(<'BC2', txPrevious, 
+                                    <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, pk(x.2)>,
+                                   x.1)
+                         ) @ #vk.34 )
+                    case Alice_receive
+                    by contradiction /* from formulas */
+                  next
+                    case Bob_send
+                    by contradiction /* from formulas */
+                  next
+                    case c_sign
+                    solve( !KU( TXhash(<
+                                        TXhash(<txPrevious, 
+                                                <Script1, 
+                                                 sign(<'BC2', txPrevious, 
+                                                       <pkA1, timelock.1, HTLChash(Script1), pk(x.1)
+                                                       >, 
+                                                       pk(x.2)>,
+                                                      x.1)
+                                                >, 
+                                                pk(x.2)>), 
+                                        sign(<'BC2', 
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                             x.2), 
+                                        pkB1, timelock_B, hash.1, pkA3>)
+                           ) @ #vk.27 )
+                      case Commit_Tx
+                      solve( !KU( TXhash(<txPrevious, 
+                                          <Script1, 
+                                           sign(<'BC2', txPrevious, 
+                                                 <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, 
+                                                 pk(x.2)>,
+                                                x.1)
+                                          >, 
+                                          pk(x.2)>)
+                             ) @ #vk.21 )
+                        case Commit_Open_case_1
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          <Script1, 
+                                                           sign(<'BC2', txPrevious, 
+                                                                 <pkA1, timelock.1, 
+                                                                  HTLChash(Script1), pk(x.1)>, 
+                                                                 pk(x.2)>,
+                                                                x.1)
+                                                          >, 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                <Script1, 
+                                                                 sign(<'BC2', txPrevious, 
+                                                                       <pkA1, timelock.1, 
+                                                                        HTLChash(Script1), pk(x.1)
+                                                                       >, 
+                                                                       pk(x.2)>,
+                                                                      x.1)
+                                                                >, 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case Commit_Open_case_2
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          <Script1, 
+                                                           sign(<'BC2', txPrevious, 
+                                                                 <pkA1, timelock.1, 
+                                                                  HTLChash(Script1), pk(x.1)>, 
+                                                                 pk(x.2)>,
+                                                                x.1)
+                                                          >, 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                <Script1, 
+                                                                 sign(<'BC2', txPrevious, 
+                                                                       <pkA1, timelock.1, 
+                                                                        HTLChash(Script1), pk(x.1)
+                                                                       >, 
+                                                                       pk(x.2)>,
+                                                                      x.1)
+                                                                >, 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          <Script1, 
+                                                           sign(<'BC2', txPrevious, 
+                                                                 <pkA1, timelock.1, 
+                                                                  HTLChash(Script1), pk(x.1)>, 
+                                                                 pk(x.2)>,
+                                                                x.1)
+                                                          >, 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                <Script1, 
+                                                                 sign(<'BC2', txPrevious, 
+                                                                       <pkA1, timelock.1, 
+                                                                        HTLChash(Script1), pk(x.1)
+                                                                       >, 
+                                                                       pk(x.2)>,
+                                                                      x.1)
+                                                                >, 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin_case_1
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_2
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case c_TXhash
+                      solve( !KU( TXhash(<txPrevious, 
+                                          <Script1, 
+                                           sign(<'BC2', txPrevious, 
+                                                 <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, 
+                                                 pk(x.2)>,
+                                                x.1)
+                                          >, 
+                                          pk(x.2)>)
+                             ) @ #vk.22 )
+                        case Commit_Open_case_1
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          <Script1, 
+                                                           sign(<'BC2', txPrevious, 
+                                                                 <pkA1, timelock.1, 
+                                                                  HTLChash(Script1), pk(x.1)>, 
+                                                                 pk(x.2)>,
+                                                                x.1)
+                                                          >, 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                <Script1, 
+                                                                 sign(<'BC2', txPrevious, 
+                                                                       <pkA1, timelock.1, 
+                                                                        HTLChash(Script1), pk(x.1)
+                                                                       >, 
+                                                                       pk(x.2)>,
+                                                                      x.1)
+                                                                >, 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case Commit_Open_case_2
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          <Script1, 
+                                                           sign(<'BC2', txPrevious, 
+                                                                 <pkA1, timelock.1, 
+                                                                  HTLChash(Script1), pk(x.1)>, 
+                                                                 pk(x.2)>,
+                                                                x.1)
+                                                          >, 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                <Script1, 
+                                                                 sign(<'BC2', txPrevious, 
+                                                                       <pkA1, timelock.1, 
+                                                                        HTLChash(Script1), pk(x.1)
+                                                                       >, 
+                                                                       pk(x.2)>,
+                                                                      x.1)
+                                                                >, 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          <Script1, 
+                                                           sign(<'BC2', txPrevious, 
+                                                                 <pkA1, timelock.1, 
+                                                                  HTLChash(Script1), pk(x.1)>, 
+                                                                 pk(x.2)>,
+                                                                x.1)
+                                                          >, 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                <Script1, 
+                                                                 sign(<'BC2', txPrevious, 
+                                                                       <pkA1, timelock.1, 
+                                                                        HTLChash(Script1), pk(x.1)
+                                                                       >, 
+                                                                       pk(x.2)>,
+                                                                      x.1)
+                                                                >, 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin_case_1
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_2
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  qed
+                next
+                  case Commit_TimeOut_case_1
+                  solve( !KU( sign(<'BC2', txPrevious, 
+                                    <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)>,
+                                   x.1)
+                         ) @ #vk.32 )
+                    case Alice_receive
+                    by contradiction /* from formulas */
+                  next
+                    case Bob_send
+                    by contradiction /* from formulas */
+                  next
+                    case c_sign
+                    solve( !KU( TXhash(<
+                                        TXhash(<txPrevious, 
+                                                sign(<'BC2', txPrevious, 
+                                                      <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)>,
+                                                     x.1), 
+                                                pk(x.2)>), 
+                                        sign(<'BC2', 
+                                              TXhash(<txPrevious, 
+                                                      sign(<'BC2', txPrevious, 
+                                                            <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)
+                                                           >,
+                                                           x.1), 
+                                                      pk(x.2)>), 
+                                              pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                             x.2), 
+                                        pkB1, timelock_B, hash.2, pkA3>)
+                           ) @ #vk.27 )
+                      case Commit_Tx
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                pk(x.2)>,
+                                               x.1), 
+                                          pk(x.2)>)
+                             ) @ #vk.21 )
+                        case Commit_TimeOut
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case c_TXhash
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                pk(x.2)>,
+                                               x.1), 
+                                          pk(x.2)>)
+                             ) @ #vk.22 )
+                        case Commit_TimeOut
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  qed
+                next
+                  case Commit_TimeOut_case_2
+                  solve( !KU( TXhash(<
+                                      TXhash(<txPrevious, 
+                                              sign(<'BC2', txPrevious, 
+                                                    <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)>,
+                                                   x.1), 
+                                              pk(x.2)>), 
+                                      sign(<'BC2', 
+                                            TXhash(<txPrevious, 
+                                                    sign(<'BC2', txPrevious, 
+                                                          <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)>,
+                                                         x.1), 
+                                                    pk(x.2)>), 
+                                            pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                           x.2), 
+                                      pkB1, timelock_B, hash.2, pkA3>)
+                         ) @ #vk.24 )
+                    case Commit_Tx
+                    solve( !KU( sign(<'BC2', txPrevious, 
+                                      <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)>,
+                                     x.1)
+                           ) @ #vk.32 )
+                      case Alice_receive
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_send
+                      by contradiction /* from formulas */
+                    next
+                      case c_sign
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                pk(x.2)>,
+                                               x.1), 
+                                          pk(x.2)>)
+                             ) @ #vk.21 )
+                        case Commit_TimeOut
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !KU( sign(<'BC2', txPrevious, 
+                                      <pk(x.1), '1', hash.1, pkB3.1>, pk(x.2)>,
+                                     x.1)
+                           ) @ #vk.33 )
+                      case Alice_receive
+                      by contradiction /* from formulas */
+                    next
+                      case Bob_send
+                      by contradiction /* from formulas */
+                    next
+                      case c_sign
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                pk(x.2)>,
+                                               x.1), 
+                                          pk(x.2)>)
+                             ) @ #vk.22 )
+                        case Commit_TimeOut
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), '1', hash.1, pkB3.1>, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), '1', hash.1, pkB3.1
+                                                                      >, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  qed
+                next
+                  case Commit_TimeOut_case_3
+                  solve( !KU( TXhash(<
+                                      TXhash(<txPrevious, 
+                                              sign(<'BC2', txPrevious, 
+                                                    <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, pk(x.2)>,
+                                                   x.1), 
+                                              pk(x.2)>), 
+                                      sign(<'BC2', 
+                                            TXhash(<txPrevious, 
+                                                    sign(<'BC2', txPrevious, 
+                                                          <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, 
+                                                          pk(x.2)>,
+                                                         x.1), 
+                                                    pk(x.2)>), 
+                                            pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                           x.2), 
+                                      pkB1, timelock_B, hash.2, pkA3>)
+                         ) @ #vk.24 )
+                    case Commit_Tx
+                    solve( !KU( sign(<'BC2', txPrevious, 
+                                      <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, pk(x.2)>,
+                                     x.1)
+                           ) @ #vk.32 )
+                      case Alice_receive
+                      by contradiction /* from formulas */
+                    next
+                      case c_sign
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, 
+                                                <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, pk(x.2)>,
+                                               x.1), 
+                                          pk(x.2)>)
+                             ) @ #vk.21 )
+                        case Commit_TimeOut
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), ('1'+'1'), hash.1, pkB3.1
+                                                                >, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), ('1'+'1'), hash.1, 
+                                                                       pkB3.1>, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), ('1'+'1'), hash.1, pkB3.1
+                                                                >, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), ('1'+'1'), hash.1, 
+                                                                       pkB3.1>, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !KU( TXhash(<txPrevious, 
+                                        sign(<'BC2', txPrevious, 
+                                              <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, pk(x.2)>,
+                                             x.1), 
+                                        pk(x.2)>)
+                           ) @ #vk.19 )
+                      case Commit_TimeOut
+                      solve( !KU( sign(<'BC2', txPrevious, 
+                                        <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, pk(x.2)>,
+                                       x.1)
+                             ) @ #vk.33 )
+                        case Alice_receive
+                        by contradiction /* from formulas */
+                      next
+                        case c_sign
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), ('1'+'1'), hash.1, pkB3.1
+                                                                >, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), ('1'+'1'), hash.1, 
+                                                                       pkB3.1>, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      qed
+                    next
+                      case c_TXhash
+                      solve( !KU( sign(<'BC2', txPrevious, 
+                                        <pk(x.1), ('1'+'1'), hash.1, pkB3.1>, pk(x.2)>,
+                                       x.1)
+                             ) @ #vk.34 )
+                        case Alice_receive
+                        by contradiction /* from formulas */
+                      next
+                        case c_sign
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, 
+                                                                <pk(x.1), ('1'+'1'), hash.1, pkB3.1
+                                                                >, 
+                                                                pk(x.2)>,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, 
+                                                                      <pk(x.1), ('1'+'1'), hash.1, 
+                                                                       pkB3.1>, 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.2, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.2, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      qed
+                    next
+                      case creatCointoCoin
+                      by contradiction /* from formulas */
+                    qed
+                  qed
+                next
+                  case MineCoin
+                  by contradiction /* from formulas */
+                next
+                  case Simple_Tx_case_1
+                  solve( !KU( sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1)
+                         ) @ #vk.32 )
+                    case c_sign
+                    solve( !KU( TXhash(<
+                                        TXhash(<txPrevious, 
+                                                sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), 
+                                                pk(x.2)>), 
+                                        sign(<'BC2', 
+                                              TXhash(<txPrevious, 
+                                                      sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                           x.1), 
+                                                      pk(x.2)>), 
+                                              pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                             x.2), 
+                                        pkB1, timelock_B, hash.1, pkA3>)
+                           ) @ #vk.27 )
+                      case Commit_Tx
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), pk(x.2)
+                                         >)
+                             ) @ #vk.21 )
+                        case Simple_Tx
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case c_TXhash
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), pk(x.2)
+                                         >)
+                             ) @ #vk.22 )
+                        case Simple_Tx
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    qed
+                  next
+                    case creatCointoCoin_case_01
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_02
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_03
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_04
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_05
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_06
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_07
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_08
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_09
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_10
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_11
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_12
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_13
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_14
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_15
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_16
+                    by contradiction /* from formulas */
+                  qed
+                next
+                  case Simple_Tx_case_2
+                  solve( !KU( TXhash(<
+                                      TXhash(<txPrevious, 
+                                              sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), 
+                                              pk(x.2)>), 
+                                      sign(<'BC2', 
+                                            TXhash(<txPrevious, 
+                                                    sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                         x.1), 
+                                                    pk(x.2)>), 
+                                            pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                           x.2), 
+                                      pkB1, timelock_B, hash.1, pkA3>)
+                         ) @ #vk.24 )
+                    case Commit_Tx
+                    solve( !KU( sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1)
+                           ) @ #vk.32 )
+                      case c_sign
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), pk(x.2)
+                                         >)
+                             ) @ #vk.21 )
+                        case Simple_Tx
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case creatCointoCoin_case_01
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_02
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_03
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_04
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_05
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_06
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_07
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_08
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_09
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_10
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_11
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_12
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_13
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_14
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_15
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_16
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !KU( sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1)
+                           ) @ #vk.33 )
+                      case c_sign
+                      solve( !KU( TXhash(<txPrevious, 
+                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), pk(x.2)
+                                         >)
+                             ) @ #vk.22 )
+                        case Simple_Tx
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case c_TXhash
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case creatCointoCoin_case_01
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_02
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_03
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_04
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_05
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_06
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_07
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_08
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_09
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_10
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_11
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_12
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_13
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_14
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_15
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_16
+                      by contradiction /* from formulas */
+                    qed
+                  qed
+                next
+                  case Simple_Tx_case_3
+                  solve( !KU( TXhash(<
+                                      TXhash(<txPrevious, 
+                                              sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), 
+                                              pk(x.2)>), 
+                                      sign(<'BC2', 
+                                            TXhash(<txPrevious, 
+                                                    sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                         x.1), 
+                                                    pk(x.2)>), 
+                                            pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                           x.2), 
+                                      pkB1, timelock_B, hash.1, pkA3>)
+                         ) @ #vk.24 )
+                    case Commit_Tx
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                           x.1), 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            sign(<'BC2', txPrevious, pk(x.1), 
+                                                                  pk(x.2)>,
+                                                                 x.1), 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !KU( TXhash(<txPrevious, 
+                                        sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), pk(x.2)>)
+                           ) @ #vk.19 )
+                      case Simple_Tx_case_1
+                      solve( !KU( sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1)
+                             ) @ #vk.33 )
+                        case c_sign
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin_case_01
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_02
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_03
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_04
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_05
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_06
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_07
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_08
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_09
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_10
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_11
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_12
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_13
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_14
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_15
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_16
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case Simple_Tx_case_2
+                      solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                        <pk(x), timelock, hash, pkB3>,
+                                        TXhash(<
+                                                TXhash(<txPrevious, 
+                                                        sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                             x.1), 
+                                                        pk(x.2)>), 
+                                                sign(<'BC2', 
+                                                      TXhash(<txPrevious, 
+                                                              sign(<'BC2', txPrevious, pk(x.1), 
+                                                                    pk(x.2)>,
+                                                                   x.1), 
+                                                              pk(x.2)>), 
+                                                      pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                     x.2), 
+                                                pkB1, timelock_B, hash.1, pkA3>),
+                                        LedgerTick
+                             )[+] ▶₀ #tBTout )
+                        case Commit_Tx
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case c_TXhash
+                      solve( !KU( sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1)
+                             ) @ #vk.34 )
+                        case c_sign
+                        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                          <pk(x), timelock, hash, pkB3>,
+                                          TXhash(<
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  sign(<'BC2', 
+                                                        TXhash(<txPrevious, 
+                                                                sign(<'BC2', txPrevious, pk(x.1), 
+                                                                      pk(x.2)>,
+                                                                     x.1), 
+                                                                pk(x.2)>), 
+                                                        pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                       x.2), 
+                                                  pkB1, timelock_B, hash.1, pkA3>),
+                                          LedgerTick
+                               )[+] ▶₀ #tBTout )
+                          case Commit_Tx
+                          by contradiction /* from formulas */
+                        qed
+                      next
+                        case creatCointoCoin_case_01
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_02
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_03
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_04
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_05
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_06
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_07
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_08
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_09
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_10
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_11
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_12
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_13
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_14
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_15
+                        by contradiction /* from formulas */
+                      next
+                        case creatCointoCoin_case_16
+                        by contradiction /* from formulas */
+                      qed
+                    next
+                      case creatCointoCoin_case_1
+                      by contradiction /* from formulas */
+                    next
+                      case creatCointoCoin_case_2
+                      by contradiction /* from formulas */
+                    qed
+                  qed
+                qed
+              qed
+            next
+              case Tick_start
+              solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                <pk(x), timelock, hash, pkB3>,
+                                TXhash(<tx2, 
+                                        sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                             x.1), 
+                                        pkB1, timelock_B, hash.1, pkA3>),
+                                LedgerTick
+                     )[+] ▶₀ #tBTout )
+                case Commit_Tx_case_1
+                by contradiction /* from formulas */
+              next
+                case Commit_Tx_case_2
+                by contradiction /* from formulas */
+              next
+                case Commit_Tx_case_3
+                by contradiction /* from formulas */
+              next
+                case Commit_Tx_case_4
+                by contradiction /* from formulas */
+              next
+                case Commit_Tx_case_5
+                by contradiction /* from formulas */
+              next
+                case Commit_Tx_case_6
+                by contradiction /* from formulas */
+              qed
+            qed
+          next
+            case Tick_start
+            solve( !SimpleTx( 'BC2', txPrevious, SigPre, pk(x.1), tx2,
+                              ('1'+'1')
+                   ) ▶₀ #tBcom )
+              case Commit_Open
+              solve( !KU( sign(<'BC2', txPrevious, 
+                                <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, pk(x.2)>,
+                               x.1)
+                     ) @ #vk.34 )
+                case Alice_receive
+                by contradiction /* from formulas */
+              next
+                case Bob_send
+                by contradiction /* from formulas */
+              next
+                case c_sign
+                solve( !KU( TXhash(<
+                                    TXhash(<txPrevious, 
+                                            <Script1, 
+                                             sign(<'BC2', txPrevious, 
+                                                   <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, 
+                                                   pk(x.2)>,
+                                                  x.1)
+                                            >, 
+                                            pk(x.2)>), 
+                                    sign(<'BC2', 
+                                          TXhash(<txPrevious, 
+                                                  <Script1, 
+                                                   sign(<'BC2', txPrevious, 
+                                                         <pkA1, timelock.1, HTLChash(Script1), 
+                                                          pk(x.1)>, 
+                                                         pk(x.2)>,
+                                                        x.1)
+                                                  >, 
+                                                  pk(x.2)>), 
+                                          pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.2), 
+                                    pkB1, timelock_B, hash.1, pkA3>)
+                       ) @ #vk.27 )
+                  case Commit_Tx
+                  solve( !KU( TXhash(<txPrevious, 
+                                      <Script1, 
+                                       sign(<'BC2', txPrevious, 
+                                             <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, pk(x.2)
+                                            >,
+                                            x.1)
+                                      >, 
+                                      pk(x.2)>)
+                         ) @ #vk.21 )
+                    case Commit_Open_case_1
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            <Script1, 
+                                                             sign(<'BC2', txPrevious, 
+                                                                   <pkA1, timelock.1, 
+                                                                    HTLChash(Script1), pk(x.1)>, 
+                                                                   pk(x.2)>,
+                                                                  x.1)
+                                                            >, 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case Commit_Open_case_2
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            <Script1, 
+                                                             sign(<'BC2', txPrevious, 
+                                                                   <pkA1, timelock.1, 
+                                                                    HTLChash(Script1), pk(x.1)>, 
+                                                                   pk(x.2)>,
+                                                                  x.1)
+                                                            >, 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            <Script1, 
+                                                             sign(<'BC2', txPrevious, 
+                                                                   <pkA1, timelock.1, 
+                                                                    HTLChash(Script1), pk(x.1)>, 
+                                                                   pk(x.2)>,
+                                                                  x.1)
+                                                            >, 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case creatCointoCoin_case_1
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_2
+                    by contradiction /* from formulas */
+                  qed
+                next
+                  case c_TXhash
+                  solve( !KU( TXhash(<txPrevious, 
+                                      <Script1, 
+                                       sign(<'BC2', txPrevious, 
+                                             <pkA1, timelock.1, HTLChash(Script1), pk(x.1)>, pk(x.2)
+                                            >,
+                                            x.1)
+                                      >, 
+                                      pk(x.2)>)
+                         ) @ #vk.22 )
+                    case Commit_Open_case_1
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            <Script1, 
+                                                             sign(<'BC2', txPrevious, 
+                                                                   <pkA1, timelock.1, 
+                                                                    HTLChash(Script1), pk(x.1)>, 
+                                                                   pk(x.2)>,
+                                                                  x.1)
+                                                            >, 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case Commit_Open_case_2
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            <Script1, 
+                                                             sign(<'BC2', txPrevious, 
+                                                                   <pkA1, timelock.1, 
+                                                                    HTLChash(Script1), pk(x.1)>, 
+                                                                   pk(x.2)>,
+                                                                  x.1)
+                                                            >, 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      <Script1, 
+                                                       sign(<'BC2', txPrevious, 
+                                                             <pkA1, timelock.1, HTLChash(Script1), 
+                                                              pk(x.1)>, 
+                                                             pk(x.2)>,
+                                                            x.1)
+                                                      >, 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            <Script1, 
+                                                             sign(<'BC2', txPrevious, 
+                                                                   <pkA1, timelock.1, 
+                                                                    HTLChash(Script1), pk(x.1)>, 
+                                                                   pk(x.2)>,
+                                                                  x.1)
+                                                            >, 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case creatCointoCoin_case_1
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_2
+                    by contradiction /* from formulas */
+                  qed
+                qed
+              qed
+            next
+              case MineCoin
+              by contradiction /* from formulas */
+            next
+              case Simple_Tx
+              solve( !KU( sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1)
+                     ) @ #vk.32 )
+                case c_sign
+                solve( !KU( TXhash(<
+                                    TXhash(<txPrevious, 
+                                            sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), 
+                                            pk(x.2)>), 
+                                    sign(<'BC2', 
+                                          TXhash(<txPrevious, 
+                                                  sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), 
+                                                  pk(x.2)>), 
+                                          pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.2), 
+                                    pkB1, timelock_B, hash.1, pkA3>)
+                       ) @ #vk.27 )
+                  case Commit_Tx
+                  solve( !KU( TXhash(<txPrevious, 
+                                      sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>, x.1), pk(x.2)>)
+                         ) @ #vk.21 )
+                    case Simple_Tx_case_1
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                           x.1), 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            sign(<'BC2', txPrevious, pk(x.1), 
+                                                                  pk(x.2)>,
+                                                                 x.1), 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case Simple_Tx_case_2
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                           x.1), 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            sign(<'BC2', txPrevious, pk(x.1), 
+                                                                  pk(x.2)>,
+                                                                 x.1), 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case c_TXhash
+                    solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                      <pk(x), timelock, hash, pkB3>,
+                                      TXhash(<
+                                              TXhash(<txPrevious, 
+                                                      sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                           x.1), 
+                                                      pk(x.2)>), 
+                                              sign(<'BC2', 
+                                                    TXhash(<txPrevious, 
+                                                            sign(<'BC2', txPrevious, pk(x.1), 
+                                                                  pk(x.2)>,
+                                                                 x.1), 
+                                                            pk(x.2)>), 
+                                                    pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                   x.2), 
+                                              pkB1, timelock_B, hash.1, pkA3>),
+                                      LedgerTick
+                           )[+] ▶₀ #tBTout )
+                      case Commit_Tx
+                      by contradiction /* from formulas */
+                    qed
+                  next
+                    case creatCointoCoin_case_1
+                    by contradiction /* from formulas */
+                  next
+                    case creatCointoCoin_case_2
+                    by contradiction /* from formulas */
+                  qed
+                next
+                  case c_TXhash
+                  solve( !CommitTx( 'BC2', tx0, SigA_0,
+                                    <pk(x), timelock, hash, pkB3>,
+                                    TXhash(<
+                                            TXhash(<txPrevious, 
+                                                    sign(<'BC2', txPrevious, pk(x.1), pk(x.2)>,
+                                                         x.1), 
+                                                    pk(x.2)>), 
+                                            sign(<'BC2', 
+                                                  TXhash(<txPrevious, 
+                                                          sign(<'BC2', txPrevious, pk(x.1), pk(x.2)
+                                                               >,
+                                                               x.1), 
+                                                          pk(x.2)>), 
+                                                  pk(x.2), pkB1, timelock_B, hash.1, pkA3>,
+                                                 x.2), 
+                                            pkB1, timelock_B, hash.1, pkA3>),
+                                    LedgerTick
+                         )[+] ▶₀ #tBTout )
+                    case Commit_Tx
+                    by contradiction /* from formulas */
+                  qed
+                qed
+              next
+                case creatCointoCoin_case_01
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_02
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_03
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_04
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_05
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_06
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_07
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_08
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_09
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_10
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_11
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_12
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_13
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_14
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_15
+                by contradiction /* from formulas */
+              next
+                case creatCointoCoin_case_16
+                by contradiction /* from formulas */
+              qed
+            qed
+          qed
+        next
+          case Tick_start
+          solve( !CommitTx( 'BC2', tx0, SigA_0,
+                            <pk(x), timelock, hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.1), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx
+            by contradiction /* from formulas */
+          qed
+        qed
+      next
+        case Tick_case_3
+        solve( Tick( 'BC2', (LedgerTick.1+x.3) )[+] ▶₀ #vr )
+          case Tick_case_1
+          solve( !CommitTx( 'BC2', tx0, SigA_0,
+                            <pk(x), timelock, hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.1), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx
+            by contradiction /* from formulas */
+          qed
+        next
+          case Tick_case_2
+          solve( !CommitTx( 'BC2', tx0, SigA_0,
+                            <pk(x), timelock, hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.1), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx_case_01
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_02
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_03
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_04
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_05
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_06
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_07
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_08
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_09
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_10
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_11
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_12
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_13
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_14
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_15
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_16
+            by contradiction /* from formulas */
+          qed
+        next
+          case Tick_case_3
+          solve( !CommitTx( 'BC2', tx0, SigA_0,
+                            <pk(x), timelock, hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.1), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx_case_01
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_02
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_03
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_04
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_05
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_06
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_07
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_08
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_09
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_10
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_11
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_12
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_13
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_14
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_15
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_16
+            by contradiction /* from formulas */
+          qed
+        next
+          case Tick_case_4
+          solve( !CommitTx( 'BC2', tx0, SigA_0,
+                            <pk(x), timelock, hash, pkB3>,
+                            TXhash(<tx2, 
+                                    sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>,
+                                         x.1), 
+                                    pkB1, timelock_B, hash.1, pkA3>),
+                            LedgerTick
+                 )[+] ▶₀ #tBTout )
+            case Commit_Tx_case_01
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_02
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_03
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_04
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_05
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_06
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_07
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_08
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_09
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_10
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_11
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_12
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_13
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_14
+            by contradiction /* from formulas */
+          next
+            case Commit_Tx_case_15
+            by contradiction /* from formulas */
+          qed
+        qed
+      next
+        case Tick_case_4
+        solve( !CommitTx( 'BC2', tx0, SigA_0,
+                          <pk(x), timelock, hash, pkB3>,
+                          TXhash(<tx2, 
+                                  sign(<'BC2', tx2, pk(x.1), pkB1, timelock_B, hash.1, pkA3>, x.1), 
+                                  pkB1, timelock_B, hash.1, pkA3>),
+                          LedgerTick
+               )[+] ▶₀ #tBTout )
+          case Commit_Tx_case_01
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_02
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_03
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_04
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_05
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_06
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_07
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_08
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_09
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_10
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_11
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_12
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_13
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_14
+          by contradiction /* from formulas */
+        next
+          case Commit_Tx_case_15
+          by contradiction /* from formulas */
+        qed
+      qed
+    qed
+  qed
+qed
+
+restriction stable_growing_blockchain:
+  "∀ height #i.
+    (Tick( 'BC1', height ) @ #i) ⇒ (∃ #j. Tick( 'BC2', height ) @ #j)"
+
+/* All well-formedness checks were successful. */
+
+end
